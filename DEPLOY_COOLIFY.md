@@ -30,7 +30,60 @@ you only have to enter **4 variables** manually.
 
 ---
 
-## 📦 مراحل دیپلوی روی Coolify
+## 🚄 روش پیشنهادی: نصب با Docker Image (سریع‌ترین)
+
+اگر می‌خواهی موقع اضافه کردن پروژه‌ی جدید روی Coolify، **بدون build** و فقط با
+**pull کردن یک image آماده** نصب کنی، این روش بهترینه.
+
+### مرحله ۱ — یک‌بار image را بساز (خودکار)
+ابتدا workflow را فعال کنید (یک‌بار، از حساب گیت‌هاب خودتان):
+
+```bash
+mkdir -p .github/workflows
+cp deploy/github-workflow/docker-image.yml .github/workflows/docker-image.yml
+git add .github/workflows/docker-image.yml && git commit -m "ci: enable GHCR build" && git push
+```
+
+> چرا دستی؟ افزودن فایل به `.github/workflows` نیاز به دسترسی `workflows` دارد که
+> از طریق برخی App‌ها مسدود است. جزئیات در `deploy/github-workflow/README.md`.
+
+سپس به محض push شدن کد روی `main` (یا اجرای دستی از تب Actions در گیت‌هاب)،
+این ورک‌فلو به‌صورت خودکار image را build کرده و روی **GHCR** منتشر می‌کند:
+
+```
+ghcr.io/<owner>/<repo>:latest
+# مثال:
+ghcr.io/saeedkhoshafsar/mirzabot:latest
+```
+
+> 💡 برای اینکه image **public** شود (تا Coolify بدون لاگین pull کند)، یک‌بار به
+> GitHub → repo → **Packages** → پکیج → **Package settings** → *Change visibility*
+> → **Public** بروید. (یا در Coolify یک Registry credential با توکن GHCR بسازید.)
+
+### مرحله ۲ — در Coolify
+دو حالت دارید:
+
+**حالت A — Docker Image (تک‌کانتینر، دیتابیس جدا):**
+1. **New Resource → Docker Image** و این تگ را وارد کنید:
+   `ghcr.io/saeedkhoshafsar/mirzabot:latest`
+2. متغیرها را ست کنید: ۴ متغیر اصلی + `DB_HOST/DB_NAME/DB_USER/DB_PASSWORD`
+   (به یک دیتابیس MySQL/MariaDB که جداگانه در Coolify ساخته‌اید اشاره کند).
+3. پورت `80` را expose و دامنه را روی `https://$BOT_DOMAIN` ست کنید.
+
+**حالت B — Docker Compose با image (پیشنهادی، دیتابیس همراه):**
+1. **New Resource → Docker Compose** و فایل **`docker-compose.image.yml`** را انتخاب کنید.
+2. متغیر `MIRZA_IMAGE` را روی image خودتان ست کنید (پیش‌فرض همین ریپو است).
+3. ۴ متغیر اصلی را وارد کنید و دامنه‌ی سرویس `app` را تنظیم کنید.
+4. **Deploy**. (دیتابیس MariaDB هم خودکار همراهش بالا می‌آید.)
+
+> این روش (B) راحت‌ترین حالت است: فقط image را pull می‌کند و دیتابیس را هم
+> خودش می‌سازد. هیچ build داخل Coolify انجام نمی‌شود.
+
+---
+
+## 📦 روش دوم: Build از روی سورس (Docker Compose)
+
+مراحل دیپلوی روی Coolify
 
 1. **New Resource → Docker Compose** و این ریپازیتوری گیت را انتخاب کنید.
    - Coolify به طور خودکار `docker-compose.yml` را تشخیص می‌دهد.

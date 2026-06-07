@@ -1,0 +1,75 @@
+# ============================================================================
+#  Mirza Bot - IMAGE-BASED docker-compose for Coolify
+#
+#  Use this file when you want Coolify to PULL a pre-built image from GHCR
+#  instead of building from source (fastest way to add a new project).
+#
+#  Prerequisite: the "Build & Push Docker Image" GitHub Action has run at
+#  least once, so the image exists at:
+#       ghcr.io/<owner>/<repo>:latest
+#
+#  In Coolify:
+#   1. New Resource -> Docker Compose -> point at this repo, choose this file
+#      (docker-compose.image.yml). OR use "Docker Image" and paste the image
+#      tag together with the env vars below.
+#   2. Set MIRZA_IMAGE to your published image (see .env.example).
+#   3. Set the 4 required env vars (BOT_DOMAIN, BOT_TOKEN, ADMIN_CHAT_ID,
+#      BOT_USERNAME).
+#   4. Point the "app" service domain to https://$BOT_DOMAIN.
+#
+#  Everything else (DB, tables, webhook, cron) stays automatic.
+# ============================================================================
+
+services:
+  app:
+    # Pre-built image pulled from GHCR (override via MIRZA_IMAGE env var).
+    image: "${MIRZA_IMAGE:-ghcr.io/saeedkhoshafsar/mirzabot:latest}"
+    restart: unless-stopped
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      BOT_DOMAIN: "${BOT_DOMAIN}"
+      BOT_TOKEN: "${BOT_TOKEN}"
+      ADMIN_CHAT_ID: "${ADMIN_CHAT_ID}"
+      BOT_USERNAME: "${BOT_USERNAME}"
+      DB_HOST: "mariadb"
+      DB_PORT: "3306"
+      DB_NAME: "${DB_NAME:-mirzabot}"
+      DB_USER: "${DB_USER:-mirzabot}"
+      DB_PASSWORD: "${DB_PASSWORD:-mirzabot}"
+    expose:
+      - "80"
+    ports:
+      - "80"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1/health.php"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  mariadb:
+    image: mariadb:10.11
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: "${DB_NAME:-mirzabot}"
+      MARIADB_USER: "${DB_USER:-mirzabot}"
+      MARIADB_PASSWORD: "${DB_PASSWORD:-mirzabot}"
+      MARIADB_ROOT_PASSWORD: "${DB_ROOT_PASSWORD:-mirzabot_root}"
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --max_allowed_packet=64M
+    volumes:
+      - mirza_db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  mirza_db:
+    driver: local
