@@ -1,0 +1,7 @@
+.git
+.gitignore
+.env
+.env.example
+*.log
+npm-debug.log
+docker-compose.override.yml

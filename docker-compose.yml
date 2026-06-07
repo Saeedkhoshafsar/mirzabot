@@ -1,0 +1,74 @@
+# ============================================================================
+#  Mirza Bot - docker-compose for Coolify
+#
+#  Coolify deployment:
+#   1. Create a new "Docker Compose" resource pointing at this repo.
+#   2. In the Environment Variables panel set ONLY these 4 values:
+#        BOT_DOMAIN     = bot.example.com        (your server domain, no https://)
+#        BOT_TOKEN      = 123456:ABC-...         (Telegram bot token)
+#        ADMIN_CHAT_ID  = 123456789              (admin numeric chat id)
+#        BOT_USERNAME   = MyVpnBot               (bot username, no @)
+#   3. Set the domain of the "app" service to https://$BOT_DOMAIN in Coolify
+#      (Coolify/Traefik terminates SSL automatically).
+#
+#  Everything else (database, tables, webhook, cron) is automatic.
+# ============================================================================
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      # ---- The ONLY 4 values you must set in Coolify --------------------
+      BOT_DOMAIN: "${BOT_DOMAIN}"
+      BOT_TOKEN: "${BOT_TOKEN}"
+      ADMIN_CHAT_ID: "${ADMIN_CHAT_ID}"
+      BOT_USERNAME: "${BOT_USERNAME}"
+      # ---- Database (auto, defaults match the mariadb service below) ----
+      DB_HOST: "mariadb"
+      DB_PORT: "3306"
+      DB_NAME: "${DB_NAME:-mirzabot}"
+      DB_USER: "${DB_USER:-mirzabot}"
+      DB_PASSWORD: "${DB_PASSWORD:-mirzabot}"
+    expose:
+      - "80"
+    ports:
+      # Coolify maps this through its proxy; harmless locally too.
+      - "80"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1/health.php"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  mariadb:
+    image: mariadb:10.11
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: "${DB_NAME:-mirzabot}"
+      MARIADB_USER: "${DB_USER:-mirzabot}"
+      MARIADB_PASSWORD: "${DB_PASSWORD:-mirzabot}"
+      # Root password is auto; not needed by the app. Override if you like.
+      MARIADB_ROOT_PASSWORD: "${DB_ROOT_PASSWORD:-mirzabot_root}"
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --max_allowed_packet=64M
+    volumes:
+      - mirza_db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  mirza_db:
+    driver: local
