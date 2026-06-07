@@ -321,16 +321,19 @@ try {
     $stmt->execute();
     $tableExists = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$tableExists) {
+        // bot_id = 0 -> main bot; >0 -> a child bot (botsaz.id) for per-bot overrides
         $stmt = $pdo->prepare("CREATE TABLE botlabels (
         id INT(11) UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        bot_id INT(11) NOT NULL DEFAULT 0,
         label_key VARCHAR(190) NOT NULL,
         lang VARCHAR(10) NOT NULL DEFAULT 'fa',
         label_value TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
         updated_at TIMESTAMP NULL DEFAULT NULL,
-        UNIQUE KEY uniq_label_lang (label_key, lang))
+        UNIQUE KEY uniq_bot_label_lang (bot_id, label_key, lang))
         ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci");
         $stmt->execute();
     } else {
+        addFieldToTable("botlabels", "bot_id", "0", "INT(11) NOT NULL DEFAULT 0");
         addFieldToTable("botlabels", "label_value", null, "TEXT");
         addFieldToTable("botlabels", "updated_at", null, "TIMESTAMP NULL");
     }

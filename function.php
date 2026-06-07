@@ -1706,7 +1706,7 @@ function languagechange($path_dir = null, string $lang = 'fa')
  * @param string|null $lang    language code; null = current user language
  * @param string|null $default fallback value if nothing is found
  */
-function bot_label($key, $lang = null, $default = null)
+function bot_label($key, $lang = null, $default = null, $bot_id = null)
 {
     global $pdo, $from_id;
     static $cache = [];
@@ -1722,17 +1722,23 @@ function bot_label($key, $lang = null, $default = null)
         }
     }
 
-    $ck = $lang . '|' . $key;
+    // bot_id: which bot scope to resolve. Defaults to the current bot context
+    // (BOT_ID constant set by the child-bot router) or 0 = main bot.
+    if ($bot_id === null) {
+        $bot_id = defined('BOT_ID') ? (int) BOT_ID : 0;
+    }
+
+    $ck = $bot_id . '|' . $lang . '|' . $key;
     if (array_key_exists($ck, $cache)) {
         return $cache[$ck] !== null ? $cache[$ck] : ($default !== null ? $default : $key);
     }
 
-    // 1) DB override
+    // 1) DB override — first per-bot (bot_id), then fall back to main bot (0)
     $value = null;
     try {
         if (isset($pdo)) {
-            $stmt = $pdo->prepare("SELECT label_value FROM botlabels WHERE label_key = ? AND lang = ? LIMIT 1");
-            $stmt->execute([$key, $lang]);
+            $stmt = $pdo->prepare("SELECT label_value FROM botlabels WHERE label_key = ? AND lang = ? AND bot_id IN (?, 0) ORDER BY (bot_id = ?) DESC LIMIT 1");
+            $stmt->execute([$key, $lang, $bot_id, $bot_id]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             if ($row && isset($row['label_value']) && $row['label_value'] !== '') {
                 $value = $row['label_value'];
@@ -1762,7 +1768,7 @@ function bot_label($key, $lang = null, $default = null)
  * Stored as JSON in setting.store_terminology and editable from the web panel.
  * Returns an associative array of term => label.
  */
-function get_store_terminology()
+function get_store_terminology($bot_id = null)
 {
     global $pdo;
     $defaults = [
@@ -1773,8 +1779,26 @@ function get_store_terminology()
         'wallet'    => 'کیف پول',
         'store'     => 'فروشگاه',
     ];
+
+    if ($bot_id === null) {
+        $bot_id = defined('BOT_ID') ? (int) BOT_ID : 0;
+    }
+
     try {
         if (isset($pdo)) {
+            // Per-bot (child) store terminology lives in botsaz.setting JSON.
+            if ($bot_id > 0) {
+                $stmt = $pdo->prepare("SELECT setting FROM botsaz WHERE id = ? LIMIT 1");
+                $stmt->execute([$bot_id]);
+                $brow = $stmt->fetch(PDO::FETCH_ASSOC);
+                if ($brow && !empty($brow['setting'])) {
+                    $bset = json_decode($brow['setting'], true);
+                    if (is_array($bset) && !empty($bset['store_terminology']) && is_array($bset['store_terminology'])) {
+                        return array_merge($defaults, $bset['store_terminology']);
+                    }
+                }
+            }
+            // Main bot / fallback: global setting table.
             $stmt = $pdo->query("SELECT store_terminology FROM setting LIMIT 1");
             $row  = $stmt ? $stmt->fetch(PDO::FETCH_ASSOC) : null;
             if ($row && !empty($row['store_terminology'])) {
