@@ -2,7 +2,10 @@
 
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../function.php';
-require_once __DIR__ . '/../botapi.php';
+// NOTE: botapi.php is intentionally NOT required here. Its top-level code reads
+// php://input and may call exit (duplicate-update guard), which would abort
+// this read-only JSON endpoint and surface as a "Network Error" in the panel.
+// This endpoint only needs config.php + function.php.
 header('Content-Type: application/json');
 date_default_timezone_set('Asia/Tehran');
 ini_set('default_charset', 'UTF-8');
@@ -10,7 +13,14 @@ ini_set('error_log', 'error_log');
 
 
 $textbotlang = languagechange();
-$keyboardmain = json_decode(select("setting", "keyboardmain", null, null, "select")['keyboardmain'], true);
+$settingRow = select("setting", "keyboardmain", null, null, "select");
+$keyboardRaw = is_array($settingRow) ? ($settingRow['keyboardmain'] ?? '') : '';
+$keyboardmain = json_decode((string) $keyboardRaw, true);
+// Fall back to the default layout if the stored value is missing/invalid so
+// the endpoint never crashes with "foreach() on null" under PHP 8.
+if (!is_array($keyboardmain) || !isset($keyboardmain['keyboard']) || !is_array($keyboardmain['keyboard'])) {
+    $keyboardmain = json_decode('{"keyboard":[[{"text":"text_sell"},{"text":"text_extend"}],[{"text":"text_usertest"},{"text":"text_wheel_luck"}],[{"text":"text_Purchased_services"},{"text":"accountwallet"}],[{"text":"text_affiliates"},{"text":"text_Tariff_list"}],[{"text":"text_support"},{"text":"text_help"}]]}', true);
+}
 
 $list_keyboard = array(
     'text_sell',
