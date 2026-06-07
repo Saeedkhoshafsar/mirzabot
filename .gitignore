@@ -1,0 +1,26 @@
+# ── Secrets / environment ───────────────────────────────────────────────
+# NEVER commit real secrets. The bot config is generated at runtime from
+# environment variables (Coolify), so these must stay out of git.
+.env
+.env.*
+!.env.example
+*.local
+
+# Runtime-generated config (built by docker/entrypoint.sh from env vars).
+# The committed config.php only holds placeholders; if a real one is ever
+# written here, do not commit it.
+/config.local.php
+
+# ── Logs / temp ─────────────────────────────────────────────────────────
+*.log
+supervisord.log
+supervisord.pid
+supervisor.sock
+/tmp/*
+
+# ── OS / editor cruft ───────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
