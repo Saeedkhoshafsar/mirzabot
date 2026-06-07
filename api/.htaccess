@@ -1,14 +1,16 @@
 RewriteEngine On
 
-
+# Allow extension-less access: /api/keyboard -> /api/keyboard.php
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteCond %{REQUEST_FILENAME} !-f
-
 RewriteCond %{REQUEST_FILENAME}.php -f
-
 RewriteRule ^([^/]+)$ $1.php [L]
 
-RewriteCond %{THE_REQUEST} \s/+(.+?)\.php[\s?] [NC]
+# NOTE: the external 301 redirect that stripped ".php" from the URL was
+# removed. It broke the panel's AJAX calls: the JS fetches
+# /api/keyboard.php and the 301 -> /api/keyboard hop is not followed
+# cleanly by the SWR/axios fetch layer, surfacing as "Network Error".
+# Serving keyboard.php directly (and still allowing the clean URL above)
+# fixes the panel without changing the bundled JS.
 
-RewriteRule ^ /%1 [R=301,L]
 SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
