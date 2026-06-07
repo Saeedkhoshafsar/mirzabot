@@ -36,8 +36,12 @@ RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-enable ssh2
 
 # ---- Apache config ---------------------------------------------------------
+# Set ServerName globally to suppress the AH00558 "could not reliably determine
+# the server's fully qualified domain name" warning on startup.
 RUN a2enmod rewrite headers \
-    && sed -ri 's!AllowOverride None!AllowOverride All!g' /etc/apache2/apache2.conf
+    && sed -ri 's!AllowOverride None!AllowOverride All!g' /etc/apache2/apache2.conf \
+    && echo 'ServerName localhost' > /etc/apache2/conf-available/servername.conf \
+    && a2enconf servername
 
 # Reasonable PHP runtime settings for a Telegram bot handling webhooks
 RUN { \
