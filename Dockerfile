@@ -32,7 +32,7 @@ RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
         zip \
         mbstring \
         soap \
-    && pecl install ssh2-1.4.0 \
+    && (pecl install ssh2 || pecl install ssh2-beta) \
     && docker-php-ext-enable ssh2
 
 # ---- Apache config ---------------------------------------------------------
