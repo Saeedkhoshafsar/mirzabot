@@ -28,17 +28,20 @@ if ($users == false) {
         'cardpayment' => ""
     );
 }
+// Main-menu button labels. Resolved via bot_label() so they can be
+// overridden from the web panel (botlabels table) without editing lang files.
+// Falls back to the lang file textbot value when no override exists.
 $replacements = [
-    'text_usertest' => $textbotlang['textbot']['userTest'],
-    'text_Purchased_services' => $textbotlang['textbot']['purchasedServices'],
-    'text_support' => $textbotlang['textbot']['support'],
-    'text_help' => $textbotlang['textbot']['help'],
-    'accountwallet' => $textbotlang['textbot']['accountWallet'],
-    'text_sell' => $textbotlang['textbot']['sell'],
-    'text_Tariff_list' => $textbotlang['textbot']['tariffList'],
-    'text_affiliates' => $textbotlang['textbot']['affiliates'],
-    'text_wheel_luck' => $textbotlang['textbot']['wheelLuck'],
-    'text_extend' => $textbotlang['textbot']['extend']
+    'text_usertest' => bot_label('userTest', null, $textbotlang['textbot']['userTest']),
+    'text_Purchased_services' => bot_label('purchasedServices', null, $textbotlang['textbot']['purchasedServices']),
+    'text_support' => bot_label('support', null, $textbotlang['textbot']['support']),
+    'text_help' => bot_label('help', null, $textbotlang['textbot']['help']),
+    'accountwallet' => bot_label('accountWallet', null, $textbotlang['textbot']['accountWallet']),
+    'text_sell' => bot_label('sell', null, $textbotlang['textbot']['sell']),
+    'text_Tariff_list' => bot_label('tariffList', null, $textbotlang['textbot']['tariffList']),
+    'text_affiliates' => bot_label('affiliates', null, $textbotlang['textbot']['affiliates']),
+    'text_wheel_luck' => bot_label('wheelLuck', null, $textbotlang['textbot']['wheelLuck']),
+    'text_extend' => bot_label('extend', null, $textbotlang['textbot']['extend'])
 ];
 $admin_idss = select("admin", "*", "id_admin", $from_id, "count");
 $temp_addtional_key = [];

@@ -302,6 +302,38 @@ timeauto_not_verify,status_keyboard_config,cron_status
         addFieldToTable("setting", "roll_Status", "rolleon", "VARCHAR(200)");
         addFieldToTable("setting", "verifystart", "offverify", "VARCHAR(200)");
     }
+    // --- General e-commerce store settings (VPN is the default mode) ---
+    addFieldToTable("setting", "store_mode", "vpn", "VARCHAR(50)");
+    addFieldToTable("setting", "store_name", "", "VARCHAR(500)");
+    addFieldToTable("setting", "store_currency", "", "VARCHAR(50)");
+    addFieldToTable("setting", "store_terminology", "{}", "TEXT");
+} catch (Exception $e) {
+    file_put_contents('error_log', $e->getMessage());
+}
+
+//-----------------------------------------------------------------
+// botlabels: DB-backed overrides for bot button labels / terminology.
+// Resolver (bot_label) checks this table first, then falls back to lang/*.php.
+try {
+    $tableName = 'botlabels';
+    $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_name = :tableName");
+    $stmt->bindParam(':tableName', $tableName);
+    $stmt->execute();
+    $tableExists = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$tableExists) {
+        $stmt = $pdo->prepare("CREATE TABLE botlabels (
+        id INT(11) UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        label_key VARCHAR(190) NOT NULL,
+        lang VARCHAR(10) NOT NULL DEFAULT 'fa',
+        label_value TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+        updated_at TIMESTAMP NULL DEFAULT NULL,
+        UNIQUE KEY uniq_label_lang (label_key, lang))
+        ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci");
+        $stmt->execute();
+    } else {
+        addFieldToTable("botlabels", "label_value", null, "TEXT");
+        addFieldToTable("botlabels", "updated_at", null, "TIMESTAMP NULL");
+    }
 } catch (Exception $e) {
     file_put_contents('error_log', $e->getMessage());
 }

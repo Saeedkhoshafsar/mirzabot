@@ -1690,6 +1690,118 @@ function languagechange($path_dir = null, string $lang = 'fa')
         $lang = 'fa';
     return require __DIR__ . '/lang/' . $lang . '.php';
 }
+
+/**
+ * Resolve a bot label by key with DB-backed override support.
+ *
+ * Lookup order:
+ *   1) botlabels table (per-language override edited from the web panel)
+ *   2) the matching key inside the language file's `textbot` section
+ *   3) the provided $default (or the key itself)
+ *
+ * This is the core of the "customizable from panel" feature: button names and
+ * terminology can be overridden without touching lang/*.php files.
+ *
+ * @param string      $key     symbolic label key (e.g. "sell", "text_sell")
+ * @param string|null $lang    language code; null = current user language
+ * @param string|null $default fallback value if nothing is found
+ */
+function bot_label($key, $lang = null, $default = null)
+{
+    global $pdo, $from_id;
+    static $cache = [];
+
+    if ($lang === null) {
+        $allowed = ['fa', 'en', 'ar', 'ru', 'zh'];
+        $lang = 'fa';
+        if (!empty($from_id)) {
+            $u = select("user", "*", "id", $from_id);
+            if ($u && !empty($u['lang']) && in_array($u['lang'], $allowed, true)) {
+                $lang = $u['lang'];
+            }
+        }
+    }
+
+    $ck = $lang . '|' . $key;
+    if (array_key_exists($ck, $cache)) {
+        return $cache[$ck] !== null ? $cache[$ck] : ($default !== null ? $default : $key);
+    }
+
+    // 1) DB override
+    $value = null;
+    try {
+        if (isset($pdo)) {
+            $stmt = $pdo->prepare("SELECT label_value FROM botlabels WHERE label_key = ? AND lang = ? LIMIT 1");
+            $stmt->execute([$key, $lang]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($row && isset($row['label_value']) && $row['label_value'] !== '') {
+                $value = $row['label_value'];
+            }
+        }
+    } catch (Exception $e) {
+        // table may not exist yet on first run; ignore and fall back
+    }
+
+    // 2) language file textbot section
+    if ($value === null) {
+        $langData = languagechange(null, $lang);
+        if (isset($langData['textbot'][$key]) && $langData['textbot'][$key] !== '') {
+            $value = $langData['textbot'][$key];
+        }
+    }
+
+    $cache[$ck] = $value;
+    if ($value !== null) {
+        return $value;
+    }
+    return $default !== null ? $default : $key;
+}
+
+/**
+ * Get the editable store terminology map (customer/product/service words, etc.).
+ * Stored as JSON in setting.store_terminology and editable from the web panel.
+ * Returns an associative array of term => label.
+ */
+function get_store_terminology()
+{
+    global $pdo;
+    $defaults = [
+        'customer'  => 'کاربر',
+        'product'   => 'محصول',
+        'service'   => 'سرویس',
+        'order'     => 'سفارش',
+        'wallet'    => 'کیف پول',
+        'store'     => 'فروشگاه',
+    ];
+    try {
+        if (isset($pdo)) {
+            $stmt = $pdo->query("SELECT store_terminology FROM setting LIMIT 1");
+            $row  = $stmt ? $stmt->fetch(PDO::FETCH_ASSOC) : null;
+            if ($row && !empty($row['store_terminology'])) {
+                $decoded = json_decode($row['store_terminology'], true);
+                if (is_array($decoded)) {
+                    return array_merge($defaults, $decoded);
+                }
+            }
+        }
+    } catch (Exception $e) {
+        // ignore, return defaults
+    }
+    return $defaults;
+}
+
+/**
+ * Convenience: resolve a single terminology term.
+ */
+function store_term($term, $default = null)
+{
+    $map = get_store_terminology();
+    if (isset($map[$term]) && $map[$term] !== '') {
+        return $map[$term];
+    }
+    return $default !== null ? $default : $term;
+}
+
 function generateAuthStr($length = 10)
 {
     $characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
