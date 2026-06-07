@@ -1394,26 +1394,57 @@ function addBackgroundImage($urlimage, $qrCodeResult, $backgroundPath)
 
 function checktelegramip()
 {
-    $clientIp = $_SERVER['REMOTE_ADDR'] ?? '';
-    if (!is_string($clientIp) || $clientIp === '') {
-        return false;
-    }
+    // When the bot runs behind a reverse proxy / load balancer (Coolify,
+    // Docker, Nginx, Cloudflare, Traefik ...), $_SERVER['REMOTE_ADDR'] is the
+    // proxy's INTERNAL address (e.g. 10.0.1.4), never Telegram's real IP.
+    // We therefore collect every candidate IP from the forwarding headers as
+    // well, and accept the request if ANY of them falls inside an official
+    // Telegram range. This keeps the security check meaningful while making it
+    // work behind a proxy.
+    $candidates = [];
 
-    $clientIp = trim($clientIp);
-    if (!filter_var($clientIp, FILTER_VALIDATE_IP)) {
-        return false;
+    // Real client IP forwarded by the proxy. X-Forwarded-For may contain a
+    // comma-separated chain "client, proxy1, proxy2"; the left-most entry is
+    // the original client (Telegram).
+    if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+        foreach (explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']) as $part) {
+            $candidates[] = trim($part);
+        }
+    }
+    if (!empty($_SERVER['HTTP_X_REAL_IP'])) {
+        $candidates[] = trim($_SERVER['HTTP_X_REAL_IP']);
+    }
+    if (!empty($_SERVER['HTTP_CF_CONNECTING_IP'])) { // Cloudflare
+        $candidates[] = trim($_SERVER['HTTP_CF_CONNECTING_IP']);
+    }
+    if (!empty($_SERVER['REMOTE_ADDR'])) {
+        $candidates[] = trim($_SERVER['REMOTE_ADDR']);
     }
 
     $telegramIpRanges = [
         ['lower' => '149.154.160.0', 'upper' => '149.154.175.255'],
         ['lower' => '91.108.4.0', 'upper' => '91.108.7.255'],
-        ['lower' => '2001:67c:4e8::', 'upper' => '2001:67c:4e8:ffff:ffff:ffff:ffff:ffff']
+        ['lower' => '2001:67c:4e8::', 'upper' => '2001:67c:4e8:ffff:ffff:ffff:ffff:ffff'],
     ];
 
-    foreach ($telegramIpRanges as $range) {
-        if (isClientIpInRange($clientIp, $range['lower'], $range['upper'])) {
-            return true;
+    foreach ($candidates as $clientIp) {
+        if ($clientIp === '' || !filter_var($clientIp, FILTER_VALIDATE_IP)) {
+            continue;
         }
+        foreach ($telegramIpRanges as $range) {
+            if (isClientIpInRange($clientIp, $range['lower'], $range['upper'])) {
+                return true;
+            }
+        }
+    }
+
+    // Optional escape hatch: if TELEGRAM_IP_CHECK=off is set in the environment
+    // (e.g. when fronted by a proxy that strips forwarding headers), skip the
+    // IP allow-list entirely. The webhook secret/token in the URL still
+    // protects the endpoint.
+    $bypass = getenv('TELEGRAM_IP_CHECK');
+    if ($bypass !== false && strtolower(trim($bypass)) === 'off') {
+        return true;
     }
 
     return false;
