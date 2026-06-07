@@ -14,29 +14,29 @@ try {
     if (!$tableExists) {
         $stmt = $pdo->prepare("CREATE TABLE $tableName (
             id VARCHAR(500) PRIMARY KEY,
-            limit_usertest INT(100) NOT NULL,
-            roll_Status BOOL NOT NULL,
-            username VARCHAR(500) NOT NULL,
-            Processing_value TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
-            Processing_value_one TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
-            Processing_value_tow TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
-            Processing_value_four TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
-            step VARCHAR(500) NOT NULL,
+            limit_usertest INT(100) NOT NULL DEFAULT 1,
+            roll_Status BOOL NOT NULL DEFAULT 0,
+            username VARCHAR(500) NOT NULL DEFAULT 'none',
+            Processing_value TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+            Processing_value_one TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+            Processing_value_tow TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+            Processing_value_four TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+            step VARCHAR(500) NOT NULL DEFAULT 'none',
             description_blocking TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
-            number VARCHAR(300) NOT NULL,
-            Balance INT(255) NOT NULL,
-            User_Status VARCHAR(500) NOT NULL,
-            pagenumber INT(10) NOT NULL,
-            message_count VARCHAR(100) NOT NULL,
-            last_message_time VARCHAR(100) NOT NULL,
-            agent VARCHAR(100) NOT NULL,
-            affiliatescount VARCHAR(100) NOT NULL,
-            affiliates VARCHAR(100) NOT NULL,
-            namecustom VARCHAR(300) NOT NULL,
-            number_username VARCHAR(300) NOT NULL,
-            register VARCHAR(100) NOT NULL,
-            verify VARCHAR(100) NOT NULL,
-            cardpayment VARCHAR(100) NOT NULL,
+            number VARCHAR(300) NOT NULL DEFAULT 'none',
+            Balance INT(255) NOT NULL DEFAULT 0,
+            User_Status VARCHAR(500) NOT NULL DEFAULT 'Active',
+            pagenumber INT(10) NOT NULL DEFAULT 1,
+            message_count VARCHAR(100) NOT NULL DEFAULT '0',
+            last_message_time VARCHAR(100) NOT NULL DEFAULT '0',
+            agent VARCHAR(100) NOT NULL DEFAULT 'f',
+            affiliatescount VARCHAR(100) NOT NULL DEFAULT '0',
+            affiliates VARCHAR(100) NOT NULL DEFAULT '0',
+            namecustom VARCHAR(300) NOT NULL DEFAULT 'none',
+            number_username VARCHAR(300) NOT NULL DEFAULT '100',
+            register VARCHAR(100) NOT NULL DEFAULT 'none',
+            verify VARCHAR(100) NOT NULL DEFAULT '1',
+            cardpayment VARCHAR(100) NOT NULL DEFAULT '1',
             codeInvitation VARCHAR(100) NULL,
             pricediscount VARCHAR(100) NULL   DEFAULT '0',
             hide_mini_app_instruction VARCHAR(20) NULL   DEFAULT '0',
@@ -81,6 +81,43 @@ try {
         addFieldToTable($tableName, 'codeInvitation', null);
         addFieldToTable($tableName, 'pricediscount', "0");
         addFieldToTable($tableName, 'hide_mini_app_instruction', '0', "VARCHAR(20)");
+
+        // --- Repair NOT NULL columns that have no DEFAULT on already-existing
+        // installs. Under MySQL strict mode (STRICT_TRANS_TABLES, the default
+        // on MySQL 8) the INSERT in index.php silently fails via INSERT IGNORE
+        // because these columns are NOT NULL with no default, so new users are
+        // never created and the bot never replies. Make them safe to omit.
+        $userColumnFixes = [
+            "ALTER TABLE `user` MODIFY `limit_usertest` INT(100) NOT NULL DEFAULT 1",
+            "ALTER TABLE `user` MODIFY `roll_Status` TINYINT(1) NOT NULL DEFAULT 0",
+            "ALTER TABLE `user` MODIFY `username` VARCHAR(500) NOT NULL DEFAULT 'none'",
+            "ALTER TABLE `user` MODIFY `Processing_value` TEXT NULL",
+            "ALTER TABLE `user` MODIFY `Processing_value_one` TEXT NULL",
+            "ALTER TABLE `user` MODIFY `Processing_value_tow` TEXT NULL",
+            "ALTER TABLE `user` MODIFY `Processing_value_four` TEXT NULL",
+            "ALTER TABLE `user` MODIFY `step` VARCHAR(500) NOT NULL DEFAULT 'none'",
+            "ALTER TABLE `user` MODIFY `number` VARCHAR(300) NOT NULL DEFAULT 'none'",
+            "ALTER TABLE `user` MODIFY `Balance` INT(255) NOT NULL DEFAULT 0",
+            "ALTER TABLE `user` MODIFY `User_Status` VARCHAR(500) NOT NULL DEFAULT 'Active'",
+            "ALTER TABLE `user` MODIFY `pagenumber` INT(10) NOT NULL DEFAULT 1",
+            "ALTER TABLE `user` MODIFY `message_count` VARCHAR(100) NOT NULL DEFAULT '0'",
+            "ALTER TABLE `user` MODIFY `last_message_time` VARCHAR(100) NOT NULL DEFAULT '0'",
+            "ALTER TABLE `user` MODIFY `agent` VARCHAR(100) NOT NULL DEFAULT 'f'",
+            "ALTER TABLE `user` MODIFY `affiliatescount` VARCHAR(100) NOT NULL DEFAULT '0'",
+            "ALTER TABLE `user` MODIFY `affiliates` VARCHAR(100) NOT NULL DEFAULT '0'",
+            "ALTER TABLE `user` MODIFY `namecustom` VARCHAR(300) NOT NULL DEFAULT 'none'",
+            "ALTER TABLE `user` MODIFY `number_username` VARCHAR(300) NOT NULL DEFAULT '100'",
+            "ALTER TABLE `user` MODIFY `register` VARCHAR(100) NOT NULL DEFAULT 'none'",
+            "ALTER TABLE `user` MODIFY `verify` VARCHAR(100) NOT NULL DEFAULT '1'",
+            "ALTER TABLE `user` MODIFY `cardpayment` VARCHAR(100) NOT NULL DEFAULT '1'",
+        ];
+        foreach ($userColumnFixes as $fixSql) {
+            try {
+                $pdo->exec($fixSql);
+            } catch (Throwable $e) {
+                // Ignore: column may already be fixed or absent on some installs.
+            }
+        }
     }
 } catch (PDOException $e) {
     file_put_contents('error_log user', $e->getMessage());
