@@ -68,18 +68,32 @@ chmod 644 "$CONFIG_FILE"
 
 # ---------------------------------------------------------------------------
 # 4) Wait for the database to be reachable
+#    We test the REAL connection PHP will use (mysqli), so this works with
+#    MySQL 8 (caching_sha2_password) and MariaDB alike - unlike `mysqladmin
+#    ping`, which can fail the auth handshake on MySQL 8 and produce a
+#    misleading "not ready" warning even when the app connects fine.
 # ---------------------------------------------------------------------------
+db_ready() {
+    php -r '
+        error_reporting(0);
+        $c = @mysqli_connect($argv[1], $argv[2], $argv[3], $argv[4], (int)$argv[5]);
+        exit($c && !mysqli_connect_errno() ? 0 : 1);
+    ' "$DB_HOST" "$DB_USER" "$DB_PASSWORD" "$DB_NAME" "$DB_PORT" >/dev/null 2>&1
+}
+
 log "Waiting for database ${DB_HOST}:${DB_PORT} ..."
-for i in $(seq 1 60); do
-    if mysqladmin ping -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" -p"$DB_PASSWORD" --silent >/dev/null 2>&1; then
+DB_OK=0
+for i in $(seq 1 90); do
+    if db_ready; then
         log "Database is up."
+        DB_OK=1
         break
-    fi
-    if [ "$i" -eq 60 ]; then
-        err "Database did not become ready in time. Continuing anyway (will retry on init)."
     fi
     sleep 2
 done
+if [ "$DB_OK" -ne 1 ]; then
+    err "Database not reachable yet; init will keep retrying in the background."
+fi
 
 # ---------------------------------------------------------------------------
 # 5) Build the cron schedule (same jobs the bot would register itself)
@@ -115,31 +129,45 @@ chmod 0644 "$CRON_FILE"
 crontab "$CRON_FILE" 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
-# 6) Background init: once Apache is up, create tables + set webhook
+# 6) Background init: once Apache + DB are ready, create tables + set webhook.
+#    Runs detached so it never blocks supervisord; retries until DB is ready.
 # ---------------------------------------------------------------------------
 (
-    # Wait for the local Apache to answer
+    # 6a) Wait for the local Apache to answer
     for i in $(seq 1 30); do
-        if curl -ksS --max-time 5 "http://127.0.0.1/index.php" >/dev/null 2>&1; then
-            break
-        fi
+        curl -ksS --max-time 5 "http://127.0.0.1/health.php" >/dev/null 2>&1 && break
         sleep 2
     done
 
-    log "Initializing database tables (table.php) ..."
-    # table.php creates all tables AND sets the Telegram webhook to the public domain
-    curl -ksS --max-time 60 "http://127.0.0.1/table.php" >/dev/null 2>&1 || \
-        err "table.php init returned an error (will be retried on next container start)."
+    # 6b) Make sure the DB is actually reachable before initializing tables.
+    for i in $(seq 1 150); do
+        db_ready && break
+        sleep 2
+    done
 
-    # Make sure the webhook points at the public HTTPS domain (table.php already does
-    # this, but we re-assert it explicitly in case table.php failed midway).
+    # 6c) Initialize tables (table.php builds all tables AND sets the webhook).
+    #     Retry a few times in case the DB is slow on first boot.
+    log "Initializing database tables (table.php) ..."
+    for attempt in 1 2 3 4 5; do
+        out=$(curl -ksS --max-time 90 "http://127.0.0.1/table.php" 2>/dev/null || true)
+        # table.php prints nothing on success; on a DB failure config.php dies
+        # with an "error..." string. Treat an empty body as success.
+        if [ -z "$(printf '%s' "$out" | tr -d '[:space:]')" ]; then
+            log "Database tables initialized."
+            break
+        fi
+        err "table.php attempt ${attempt} reported: $(printf '%s' "$out" | head -c 200)"
+        sleep 5
+    done
+
+    # 6d) Re-assert the Telegram webhook to the public HTTPS domain.
     log "Setting Telegram webhook ..."
     curl -ksS --max-time 30 \
         -F "url=https://${BOT_DOMAIN}/index.php" \
         "https://api.telegram.org/bot${BOT_TOKEN}/setWebhook" >/dev/null 2>&1 || \
         err "Failed to set Telegram webhook."
 
-    # Notify the admin that the bot is up
+    # 6e) Notify the admin that the bot is up.
     curl -ksS --max-time 30 -X POST \
         "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
         -d chat_id="${ADMIN_CHAT_ID}" \
