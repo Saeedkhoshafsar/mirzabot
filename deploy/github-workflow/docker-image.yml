@@ -62,4 +62,6 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          platforms: linux/amd64
+          # Build for both Intel/AMD and ARM servers so the image runs on any
+          # Coolify host (e.g. Oracle Ampere/ARM64 or standard x86_64).
+          platforms: linux/amd64,linux/arm64
