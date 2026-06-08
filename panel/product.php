@@ -23,6 +23,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add')
       "INSERT INTO product (name_product,code_product,price_product,Volume_constraint,Service_time,Location,agent,data_limit_reset,note,category,hide_panel,one_buy_status) VALUES (?,?,?,?,?,?,?,'no_reset',?,?,'{}','0')",
       [$name, $code, (int) ($_POST['price_product'] ?? 0), (int) ($_POST['volume_product'] ?? 0), (int) ($_POST['time_product'] ?? 0), $_POST['namepanel'] ?? '', $_POST['agent_product'] ?? '', $_POST['note_product'] ?? '', $_POST['cetegory_product'] ?? '']
     );
+    // Generic product type + attributes (defaults to 'vpn' if unset).
+    $newId = (int) $pdo->lastInsertId();
+    if ($newId) {
+      $ptype = $_POST['product_type'] ?? 'vpn';
+      $attrs = is_array($_POST['attr'] ?? null) ? $_POST['attr'] : [];
+      set_product_type($newId, $ptype, $attrs);
+    }
     flash('success', $textbotlang['panel']['productAddedPrefix'] . $name . $textbotlang['panel']['productAddedSuffix']);
   } catch (Exception $e) {
     flash('error', $textbotlang['panel']['productDbError'] . $e->getMessage());
@@ -42,6 +49,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'edit'
         "UPDATE product SET name_product=?,price_product=?,Volume_constraint=?,Service_time=?,Location=?,agent=?,note=?,category=? WHERE id=?",
         [$name, (int) ($_POST['price_product'] ?? 0), (int) ($_POST['volume_product'] ?? 0), (int) ($_POST['time_product'] ?? 0), $_POST['namepanel'] ?? '', $_POST['agent_product'] ?? '', $_POST['note_product'] ?? '', $_POST['cetegory_product'] ?? '', $pid]
       );
+      // Generic product type + attributes
+      $ptype = $_POST['product_type'] ?? 'vpn';
+      $attrs = is_array($_POST['attr'] ?? null) ? $_POST['attr'] : [];
+      set_product_type($pid, $ptype, $attrs);
       flash('success', $textbotlang['panel']['productEdited']);
     } catch (Exception $e) {
       flash('error', $textbotlang['panel']['productErrorPrefix'] . $e->getMessage());
@@ -209,6 +220,15 @@ include __DIR__ . '/inc/layout_head.php';
             <label><?= $textbotlang['panel']['productColDescription'] ?></label>
             <input type="text" name="note_product" class="input" placeholder=$textbotlang['panel']['productDescriptionOptional']>
           </div>
+          <div class="field full">
+            <label>نوع محصول</label>
+            <select name="product_type" id="add_ptype" class="select" onchange="renderAttrFields('add')">
+              <?php foreach (product_types() as $tk => $td): ?>
+                <option value="<?= htmlspecialchars($tk) ?>"><?= htmlspecialchars($td['label']) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <div class="field full" id="add_attr" style="display:flex;flex-direction:column;gap:12px"></div>
         </div>
       </div>
       <div class="modal-foot">
@@ -273,6 +293,15 @@ include __DIR__ . '/inc/layout_head.php';
             <label><?= $textbotlang['panel']['productUnlimitedLabel'] ?></label>
             <input type="text" name="note_product" id="edit_note" class="input">
           </div>
+          <div class="field full">
+            <label>نوع محصول</label>
+            <select name="product_type" id="edit_ptype" class="select" onchange="renderAttrFields('edit')">
+              <?php foreach (product_types() as $tk => $td): ?>
+                <option value="<?= htmlspecialchars($tk) ?>"><?= htmlspecialchars($td['label']) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <div class="field full" id="edit_attr" style="display:flex;flex-direction:column;gap:12px"></div>
         </div>
       </div>
       <div class="modal-foot">
@@ -283,6 +312,10 @@ include __DIR__ . '/inc/layout_head.php';
   </div>
 </div>
 
+<script>
+  // Product types + their attribute field definitions (from product_types()).
+  window.PRODUCT_TYPES = <?= json_encode(product_types(), JSON_UNESCAPED_UNICODE) ?>;
+</script>
 <script src="js/product.js"></script>
 
 <?php include __DIR__ . '/inc/layout_foot.php'; ?>
