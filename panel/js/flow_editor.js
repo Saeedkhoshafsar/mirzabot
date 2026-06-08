@@ -560,11 +560,13 @@
         disabled: isSystem,
         onChange: function (e) {
           var t = e.target.value;
-          var nd = Object.assign({}, d, { type: t });
           // reset config to sensible defaults for the new type, keep message if any
           var base = defaultConfigFor(t);
           if (cfg.message) base.message = cfg.message;
-          nd.config = base;
+          var nd = Object.assign({}, d, { type: t, config: base });
+          // Clear UI-only mode flags so the new type's form starts clean.
+          delete nd._action_custom;
+          delete nd._layout_custom;
           setDraft(nd);
         }
       }, CREATABLE_TYPES.map(function (t) {
@@ -663,14 +665,26 @@
       // child buttons into rows. 'auto' = one per row (default).
       if (childCount > 1) {
         var lay = (typeof cfg.child_layout === 'string') ? cfg.child_layout.trim() : '';
-        // Decide which preset the current value maps to.
-        var preset = 'auto';
-        if (/^\d+$/.test(lay)) preset = lay;          // "2","3",...
-        else if (lay !== '') preset = 'custom';        // CSV pattern
+        var layIsCsv = (lay !== '' && !/^\d+$/.test(lay));
+        // Which preset the dropdown shows. "custom" is sticky via a UI-only flag
+        // (d._layout_custom) so picking it doesn't bounce back to a numeric
+        // preset when the CSV field is still empty. The flag never reaches the
+        // server (savePanel only persists d.config).
+        var customLayout = !!d._layout_custom || layIsCsv;
+        var preset = customLayout ? 'custom' : (/^\d+$/.test(lay) ? lay : 'auto');
         function setLayoutPreset(val) {
-          if (val === 'auto') setCfg('child_layout', '');
-          else if (val === 'custom') setCfg('child_layout', lay && !/^\d+$/.test(lay) ? lay : (childCount + ''));
-          else setCfg('child_layout', val);            // "2".."4"
+          if (val === 'custom') {
+            // Enter custom mode; keep any CSV already typed, otherwise start
+            // empty so the user types their own pattern (no auto number).
+            var nd = Object.assign({}, d, { _layout_custom: true });
+            nd.config = Object.assign({}, d.config || {}, { child_layout: layIsCsv ? lay : '' });
+            setDraft(nd);
+          } else {
+            // auto ('') or a numeric preset ('2'..'4'): leave custom mode.
+            var nd2 = Object.assign({}, d, { _layout_custom: false });
+            nd2.config = Object.assign({}, d.config || {}, { child_layout: val === 'auto' ? '' : val });
+            setDraft(nd2);
+          }
         }
         // Live preview of how rows will look.
         function previewRows() {
@@ -705,7 +719,7 @@
           (preset === 'custom')
             ? h('input', {
                 type: 'text',
-                value: (lay && !/^\d+$/.test(lay)) ? lay : '',
+                value: layIsCsv ? lay : '',
                 placeholder: 'مثلاً: 2,1,3 یعنی ردیف اول ۲ دکمه، دوم ۱، سوم ۳',
                 onChange: function (e) { setCfg('child_layout', e.target.value); },
                 style: { width: '100%', marginBottom: '8px' }
@@ -745,10 +759,18 @@
         ['test', '🔋 دریافت اکانت تست'],
         ['__custom__', '✏️ سایر (دستی وارد می‌کنم)']
       ];
-      var knownKeys = COMMON_ACTIONS.map(function (a) { return a[0]; });
+      var knownKeys = COMMON_ACTIONS
+        .map(function (a) { return a[0]; })
+        .filter(function (k) { return k !== '__custom__'; });
       var curKey = cfg.action_key || '';
-      var isKnown = curKey !== '' && knownKeys.indexOf(curKey) !== -1 && curKey !== '__custom__';
-      var selVal = isKnown ? curKey : (curKey === '' ? '' : '__custom__');
+      var isKnown = curKey !== '' && knownKeys.indexOf(curKey) !== -1;
+      // Whether the "custom" mode is active. We can't infer this from the key
+      // alone (it may be empty right after the user picks "custom"), so we keep
+      // a UI-only flag on the draft (d._action_custom). It never reaches config
+      // or the server. It's true if the user explicitly chose custom OR the
+      // saved key is a non-empty value that isn't one of the known presets.
+      var customActive = !!d._action_custom || (curKey !== '' && !isKnown);
+      var selVal = customActive ? '__custom__' : (isKnown ? curKey : '');
       rows.push(h('div', { className: 'grp', key: 'gact' },
         h('div', { className: 'grp-t' }, 'این دکمه چه کاری انجام دهد؟'),
         field('عملیات',
@@ -756,8 +778,17 @@
             value: selVal,
             onChange: function (e) {
               var v = e.target.value;
-              if (v === '__custom__') { setCfg('action_key', curKey && !isKnown ? curKey : ''); }
-              else { setCfg('action_key', v); }
+              if (v === '__custom__') {
+                // Turn on custom mode; keep any custom key already typed.
+                var nd = Object.assign({}, d, { _action_custom: true });
+                if (isKnown) { nd.config = Object.assign({}, d.config || {}, { action_key: '' }); }
+                setDraft(nd);
+              } else {
+                // A preset (or "choose") was picked: leave custom mode.
+                var nd2 = Object.assign({}, d, { _action_custom: false });
+                nd2.config = Object.assign({}, d.config || {}, { action_key: v });
+                setDraft(nd2);
+              }
             }
           },
             h('option', { value: '' }, '— انتخاب کنید —'),
@@ -765,9 +796,9 @@
               return h('option', { key: a[0], value: a[0] }, a[1]);
             })),
           'یکی از کارهای آمادهٔ ربات را انتخاب کنید. اگر کاری که می‌خواهید اینجا نیست، گزینهٔ «سایر» را بزنید و شناسهٔ آن را دستی بنویسید.'),
-        (selVal === '__custom__') ? field('شناسهٔ اکشن (دستی)',
+        customActive ? field('شناسهٔ اکشن (دستی)',
           h('input', {
-            type: 'text', value: curKey === '__custom__' ? '' : curKey,
+            type: 'text', value: curKey,
             placeholder: 'مثلاً: invite, gift, renew',
             onChange: function (e) { setCfg('action_key', e.target.value); }
           }),
