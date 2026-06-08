@@ -441,6 +441,22 @@
     var loadingState = useState(true);
     var loading = loadingState[0], setLoading = loadingState[1];
 
+    // ---- Undo/Redo (client-side) ----
+    // undoStack holds previous {nodes, edges} snapshots; redoStack holds ones
+    // we've undone past. We never push while applying an undo/redo (guarded by
+    // isApplyingHistory) so the stacks stay clean.
+    var undoStack = useRef([]);
+    var redoStack = useRef([]);
+    var isApplyingHistory = useRef(false);
+    var canUndoState = useState(false);
+    var canUndo = canUndoState[0], setCanUndo = canUndoState[1];
+    var canRedoState = useState(false);
+    var canRedo = canRedoState[0], setCanRedo = canRedoState[1];
+
+    // History (saved versions) modal state.
+    var historyState = useState({ open: false, items: null });
+    var historyView = historyState[0], setHistoryView = historyState[1];
+
     // side panel state: { open, isNew, draft, pendingParent }
     var panelState = useState({ open: false, isNew: false, draft: null, pendingParent: null, dropPos: null });
     var panel = panelState[0], setPanel = panelState[1];
@@ -452,10 +468,69 @@
       el.textContent = text;
     }
 
+    var UNDO_LIMIT = 50;
+
+    function cloneRF(ns, es) {
+      // Structured deep clone of the current canvas (data only).
+      return {
+        nodes: (ns || []).map(function (n) {
+          return {
+            id: n.id, type: n.type, position: { x: n.position.x, y: n.position.y },
+            data: JSON.parse(JSON.stringify(n.data || {})),
+            selected: false
+          };
+        }),
+        edges: (es || []).map(function (e) {
+          return { id: e.id, source: e.source, target: e.target, type: e.type };
+        })
+      };
+    }
+
+    function refreshUndoButtons() {
+      setCanUndo(undoStack.current.length > 0);
+      setCanRedo(redoStack.current.length > 0);
+    }
+
+    // Push the CURRENT canvas onto the undo stack BEFORE a change is applied.
+    var pushUndo = useCallback(function (curNodes, curEdges) {
+      if (isApplyingHistory.current) return;
+      undoStack.current.push(cloneRF(curNodes, curEdges));
+      if (undoStack.current.length > UNDO_LIMIT) undoStack.current.shift();
+      redoStack.current = []; // a fresh edit invalidates the redo chain
+      refreshUndoButtons();
+    }, []);
+
     var markDirty = useCallback(function () {
       setDirty(true);
       setStatus('dirty', 'ذخیره‌نشده');
     }, []);
+
+    var undo = useCallback(function () {
+      if (undoStack.current.length === 0) return;
+      isApplyingHistory.current = true;
+      var snap = undoStack.current.pop();
+      // current state goes to redo so we can re-apply it
+      redoStack.current.push(cloneRF(nodes, edges));
+      setNodes(snap.nodes);
+      setEdges(snap.edges);
+      refreshUndoButtons();
+      setDirty(true);
+      setStatus('dirty', 'واگرد شد');
+      setTimeout(function () { isApplyingHistory.current = false; }, 0);
+    }, [nodes, edges, setNodes, setEdges]);
+
+    var redo = useCallback(function () {
+      if (redoStack.current.length === 0) return;
+      isApplyingHistory.current = true;
+      var snap = redoStack.current.pop();
+      undoStack.current.push(cloneRF(nodes, edges));
+      setNodes(snap.nodes);
+      setEdges(snap.edges);
+      refreshUndoButtons();
+      setDirty(true);
+      setStatus('dirty', 'ازنو شد');
+      setTimeout(function () { isApplyingHistory.current = false; }, 0);
+    }, [nodes, edges, setNodes, setEdges]);
 
     var load = useCallback(function () {
       setLoading(true);
@@ -463,6 +538,12 @@
         if (res && res.ok) {
           var rf = treeToRF(res.tree);
           metaRef.current = rf.meta;
+          // A fresh load resets the undo/redo timeline.
+          undoStack.current = [];
+          redoStack.current = [];
+          isApplyingHistory.current = false;
+          setCanUndo(false);
+          setCanRedo(false);
           setNodes(rf.nodes);
           setEdges(rf.edges);
           setDirty(false);
@@ -492,18 +573,25 @@
         }
         return true;
       });
-      onNodesChange(filtered);
+      // Only snapshot for structural/positional changes (not select/dimensions),
+      // and only at the END of a drag (dragging===false) so we don't flood the
+      // undo stack with one entry per mouse-move during a node drag.
       var meaningful = filtered.some(function (c) {
-        return c.type === 'position' || c.type === 'remove' || c.type === 'add';
+        if (c.type === 'remove' || c.type === 'add') return true;
+        if (c.type === 'position') return c.dragging === false;
+        return false;
       });
+      if (meaningful) pushUndo(nodes, edges);
+      onNodesChange(filtered);
       if (meaningful) markDirty();
-    }, [onNodesChange, markDirty, nodes]);
+    }, [onNodesChange, markDirty, nodes, edges, pushUndo]);
 
     var handleEdgesChange = useCallback(function (changes) {
-      onEdgesChange(changes);
       var meaningful = changes.some(function (c) { return c.type === 'remove' || c.type === 'add'; });
+      if (meaningful) pushUndo(nodes, edges);
+      onEdgesChange(changes);
       if (meaningful) markDirty();
-    }, [onEdgesChange, markDirty]);
+    }, [onEdgesChange, markDirty, nodes, edges, pushUndo]);
 
     // ---- connect two existing nodes (enforce single-parent + no-cycle) ----
     var onConnect = useCallback(function (params) {
@@ -521,9 +609,10 @@
         setStatus('error', 'اتصال حلقه‌ای مجاز نیست.');
         return;
       }
+      pushUndo(nodes, edges);
       setEdges(function (es) { return es.concat([newEdge(source, target)]); });
       markDirty();
-    }, [edges, setEdges, markDirty]);
+    }, [nodes, edges, setEdges, markDirty, pushUndo]);
 
     // ---- drag from a port and drop on empty canvas -> create child ----
     var onConnectStart = useCallback(function (_evt, params) {
@@ -583,6 +672,7 @@
       if (typeof cfg.file_extensions === 'string') {
         cfg.file_extensions = cfg.file_extensions.split(/[\s,;]+/).filter(Boolean);
       }
+      pushUndo(nodes, edges);
       if (panel.isNew) {
         var id = uid();
         var newNode = {
@@ -606,7 +696,7 @@
       }
       markDirty();
       setPanel({ open: false, isNew: false, draft: null, pendingParent: null, dropPos: null });
-    }, [panel, setNodes, setEdges, markDirty]);
+    }, [panel, nodes, edges, setNodes, setEdges, markDirty, pushUndo]);
 
     // ---- delete a node (cascade descendants, confirm, protect system) ----
     var deleteNode = useCallback(function (nodeId) {
@@ -626,13 +716,14 @@
         msg += '\n\n⚠️ ' + sysInSub.length + ' نود سیستمی نیز در این زیردرخت وجود دارد و حذف خواهد شد!';
       }
       if (!confirm(msg)) return;
+      pushUndo(nodes, edges);
       var rm = {};
       subtree.forEach(function (id) { rm[id] = true; });
       setNodes(function (ns) { return ns.filter(function (n) { return !rm[n.id]; }); });
       setEdges(function (es) { return es.filter(function (e) { return !rm[e.source] && !rm[e.target]; }); });
       markDirty();
       setPanel({ open: false, isNew: false, draft: null, pendingParent: null, dropPos: null });
-    }, [nodes, edges, setNodes, setEdges, markDirty]);
+    }, [nodes, edges, setNodes, setEdges, markDirty, pushUndo]);
 
     // ---- add a free (root-level, no parent) node via topbar button ----
     var addRootNode = useCallback(function () {
@@ -671,6 +762,7 @@
 
     var migrate = useCallback(function () {
       if (!confirm('دکمه‌های قدیمی به‌صورت نودهای فرزند منوی اصلی وارد می‌شوند. ادامه؟')) return;
+      pushUndo(nodes, edges);
       apiPost('migrate', {}).then(function (res) {
         if (res && res.ok) {
           var rf = treeToRF(res.tree);
@@ -683,7 +775,42 @@
           alert('خطا در وارد کردن.');
         }
       });
-    }, [setNodes, setEdges, markDirty]);
+    }, [nodes, edges, setNodes, setEdges, markDirty, pushUndo]);
+
+    // ---- History (saved versions) modal ----
+    var openHistory = useCallback(function () {
+      setHistoryView({ open: true, items: null });
+      apiGet('history').then(function (res) {
+        setHistoryView({ open: true, items: (res && res.ok && res.items) ? res.items : [] });
+      }).catch(function () {
+        setHistoryView({ open: true, items: [] });
+      });
+    }, []);
+
+    var closeHistory = useCallback(function () {
+      setHistoryView({ open: false, items: null });
+    }, []);
+
+    var restoreVersion = useCallback(function (id) {
+      if (!confirm('این نسخه به‌عنوان درخت فعال بازگردانده شود؟ (نسخهٔ فعلی هم به‌عنوان یک نسخهٔ تازه ذخیره می‌شود)')) return;
+      apiPost('restore', { id: id }).then(function (res) {
+        if (res && res.ok && res.tree) {
+          var rf = treeToRF(res.tree);
+          metaRef.current = rf.meta;
+          undoStack.current = [];
+          redoStack.current = [];
+          setCanUndo(false);
+          setCanRedo(false);
+          setNodes(rf.nodes);
+          setEdges(rf.edges);
+          setDirty(false);
+          setStatus('saved', 'نسخه بازگردانی شد ✓');
+          closeHistory();
+        } else {
+          alert('بازگردانی ناموفق بود: ' + ((res && res.error) || 'نامشخص'));
+        }
+      }).catch(function () { alert('خطای شبکه هنگام بازگردانی.'); });
+    }, [setNodes, setEdges, closeHistory]);
 
     // Wire the topbar buttons.
     useEffect(function () {
@@ -691,6 +818,10 @@
       var rb = document.getElementById('btn-reload');
       var mb = document.getElementById('btn-migrate');
       var ab = document.getElementById('btn-add');
+      var ub = document.getElementById('btn-undo');
+      var rdb = document.getElementById('btn-redo');
+      var hb = document.getElementById('btn-history');
+      var hc = document.getElementById('history-close');
       function onSave() { save(); }
       function onReload() {
         if (dirty && !confirm('تغییرات ذخیره‌نشده از بین می‌رود. ادامه؟')) return;
@@ -698,27 +829,58 @@
       }
       function onMigrate() { migrate(); }
       function onAdd() { addRootNode(); }
+      function onUndo() { undo(); }
+      function onRedo() { redo(); }
+      function onHistory() { openHistory(); }
+      function onHistClose() { closeHistory(); }
       if (sb) sb.addEventListener('click', onSave);
       if (rb) rb.addEventListener('click', onReload);
       if (mb) mb.addEventListener('click', onMigrate);
       if (ab) ab.addEventListener('click', onAdd);
+      if (ub) ub.addEventListener('click', onUndo);
+      if (rdb) rdb.addEventListener('click', onRedo);
+      if (hb) hb.addEventListener('click', onHistory);
+      if (hc) hc.addEventListener('click', onHistClose);
       return function () {
         if (sb) sb.removeEventListener('click', onSave);
         if (rb) rb.removeEventListener('click', onReload);
         if (mb) mb.removeEventListener('click', onMigrate);
         if (ab) ab.removeEventListener('click', onAdd);
+        if (ub) ub.removeEventListener('click', onUndo);
+        if (rdb) rdb.removeEventListener('click', onRedo);
+        if (hb) hb.removeEventListener('click', onHistory);
+        if (hc) hc.removeEventListener('click', onHistClose);
       };
-    }, [save, load, migrate, addRootNode, dirty]);
+    }, [save, load, migrate, addRootNode, dirty, undo, redo, openHistory, closeHistory]);
 
     useEffect(function () {
       var sb = document.getElementById('btn-save');
       if (sb) sb.disabled = !dirty;
     }, [dirty]);
 
-    // keyboard: Delete removes selected (non-system handled in deleteNode)
+    // Enable/disable undo & redo buttons to match the stacks.
+    useEffect(function () {
+      var ub = document.getElementById('btn-undo');
+      var rdb = document.getElementById('btn-redo');
+      if (ub) ub.disabled = !canUndo;
+      if (rdb) rdb.disabled = !canRedo;
+    }, [canUndo, canRedo]);
+
+    // keyboard: Delete removes selected; Ctrl+Z undo; Ctrl+Y / Ctrl+Shift+Z redo
     useEffect(function () {
       function onKey(e) {
         if (panel.open) return; // don't hijack while editing form
+        var meta = e.ctrlKey || e.metaKey;
+        if (meta && (e.key === 'z' || e.key === 'Z')) {
+          e.preventDefault();
+          if (e.shiftKey) { redo(); } else { undo(); }
+          return;
+        }
+        if (meta && (e.key === 'y' || e.key === 'Y')) {
+          e.preventDefault();
+          redo();
+          return;
+        }
         if (e.key === 'Delete' || e.key === 'Backspace') {
           var sel = nodes.find(function (n) { return n.selected; });
           if (sel) { e.preventDefault(); deleteNode(sel.id); }
@@ -726,13 +888,71 @@
       }
       window.addEventListener('keydown', onKey);
       return function () { window.removeEventListener('keydown', onKey); };
-    }, [nodes, deleteNode, panel.open]);
+    }, [nodes, deleteNode, panel.open, undo, redo]);
 
     useEffect(function () {
       function beforeUnload(e) { if (dirty) { e.preventDefault(); e.returnValue = ''; } }
       window.addEventListener('beforeunload', beforeUnload);
       return function () { window.removeEventListener('beforeunload', beforeUnload); };
     }, [dirty]);
+
+    // Render the History modal (it lives in the page markup, outside #root, so
+    // we build its rows imperatively and toggle the overlay's visibility).
+    useEffect(function () {
+      var overlay = document.getElementById('history-modal');
+      var listEl = document.getElementById('history-list');
+      if (!overlay || !listEl) return;
+      overlay.style.display = historyView.open ? 'flex' : 'none';
+      if (!historyView.open) return;
+
+      listEl.innerHTML = '';
+      if (historyView.items === null) {
+        var loadingDiv = document.createElement('div');
+        loadingDiv.className = 'modal-empty';
+        loadingDiv.textContent = 'در حال بارگذاری…';
+        listEl.appendChild(loadingDiv);
+        return;
+      }
+      if (historyView.items.length === 0) {
+        var emptyDiv = document.createElement('div');
+        emptyDiv.className = 'modal-empty';
+        emptyDiv.textContent = 'هنوز نسخه‌ای ذخیره نشده است.';
+        listEl.appendChild(emptyDiv);
+        return;
+      }
+      historyView.items.forEach(function (it) {
+        var row = document.createElement('div');
+        row.className = 'hist-row';
+
+        var meta = document.createElement('div');
+        meta.className = 'meta';
+        var when = document.createElement('div');
+        when.className = 'when';
+        when.textContent = it.created_at || '—';
+        var sub = document.createElement('div');
+        sub.className = 'sub';
+        var by = it.created_by ? ('توسط ' + it.created_by) : '';
+        var note = it.note ? (' • ' + it.note) : '';
+        sub.textContent = '#' + it.id + (by ? (' • ' + by) : '') + note;
+        meta.appendChild(when);
+        meta.appendChild(sub);
+
+        var badge = document.createElement('span');
+        badge.className = 'badge';
+        badge.textContent = (it.node_count != null ? it.node_count : '?') + ' نود';
+
+        var btn = document.createElement('button');
+        btn.className = 'tb-btn primary';
+        btn.style.padding = '6px 12px';
+        btn.textContent = 'بازگردانی';
+        btn.addEventListener('click', function () { restoreVersion(it.id); });
+
+        row.appendChild(meta);
+        row.appendChild(badge);
+        row.appendChild(btn);
+        listEl.appendChild(row);
+      });
+    }, [historyView, restoreVersion]);
 
     // ---- render ----
     var canvas = h('div', { ref: wrapRef, style: { position: 'absolute', inset: 0 } },

@@ -502,6 +502,64 @@ $nodeTypes = flow_node_types();
             line-height: 1.8;
             max-width: 230px;
         }
+
+        /* ---- History modal ---- */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(2, 6, 23, .72);
+            z-index: 50;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-box {
+            width: min(560px, 92vw);
+            max-height: 80vh;
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 14px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, .5);
+        }
+        .modal-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 18px;
+            border-bottom: 1px solid #1e293b;
+        }
+        .modal-head h2 { margin: 0; font-size: 16px; }
+        .modal-body { padding: 10px 14px; overflow: auto; }
+        .modal-foot {
+            padding: 10px 18px;
+            border-top: 1px solid #1e293b;
+            font-size: 11px;
+            color: #94a3b8;
+        }
+        .modal-empty { color: #94a3b8; text-align: center; padding: 22px; }
+        .hist-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border: 1px solid #1e293b;
+            border-radius: 10px;
+            margin-bottom: 8px;
+            background: #111c33;
+        }
+        .hist-row .meta { flex: 1; min-width: 0; }
+        .hist-row .meta .when { font-size: 13px; color: #e2e8f0; }
+        .hist-row .meta .sub { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+        .hist-row .badge {
+            background: #1e293b;
+            border-radius: 8px;
+            padding: 2px 8px;
+            font-size: 11px;
+            color: #cbd5e1;
+            white-space: nowrap;
+        }
     </style>
 </head>
 
@@ -513,6 +571,9 @@ $nodeTypes = flow_node_types();
             <span id="status" class="status saved">ذخیره‌شده</span>
             <span class="spacer"></span>
             <span class="hint">دابل‌کلیک=ویرایش • از پورت پایین بکشید=فرزند</span>
+            <button id="btn-undo" class="tb-btn" title="واگرد (Ctrl+Z)" disabled>↶</button>
+            <button id="btn-redo" class="tb-btn" title="ازنو (Ctrl+Y)" disabled>↷</button>
+            <button id="btn-history" class="tb-btn" title="نسخه‌های ذخیره‌شده">🕓 تاریخچه</button>
             <button id="btn-add" class="tb-btn" title="افزودن نود ریشه‌ای جدید">➕ نود جدید</button>
             <button id="btn-migrate" class="tb-btn" title="ساخت درخت از دکمه‌های قدیمی">وارد کردن دکمه‌های قبلی</button>
             <button id="btn-reload" class="tb-btn">بارگذاری مجدد</button>
@@ -529,6 +590,22 @@ $nodeTypes = flow_node_types();
                     &nbsp; <i style="background:#a855f7"></i>اکشن</div>
                 <div><i style="background:#f59e0b"></i>ورودی &nbsp; <i style="background:#ec4899"></i>شرط
                     &nbsp; <i style="background:#06b6d4"></i>n8n</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- History (version rollback) modal — populated by flow_editor.js -->
+    <div id="history-modal" class="modal-overlay" style="display:none">
+        <div class="modal-box">
+            <div class="modal-head">
+                <h2>🕓 نسخه‌های ذخیره‌شده</h2>
+                <button id="history-close" class="tb-btn ghost" style="padding:4px 10px">✕</button>
+            </div>
+            <div id="history-list" class="modal-body">
+                <div class="modal-empty">در حال بارگذاری…</div>
+            </div>
+            <div class="modal-foot">
+                <span class="hint">بازگردانی، نسخهٔ فعلی را هم به‌عنوان یک نسخهٔ تازه ذخیره می‌کند (پس قابل واگرد است).</span>
             </div>
         </div>
     </div>
