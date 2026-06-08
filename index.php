@@ -9,6 +9,7 @@ require_once 'botapi.php';
 require_once 'jdf.php';
 require_once 'function.php';
 require_once 'keyboard.php';
+require_once 'automation.php';
 require_once 'vendor/autoload.php';
 require_once 'panels.php';
 $textbotlang = languagechange();
@@ -679,6 +680,37 @@ if ($text == "/start" || $datain == "start" || $text == "start") {
             // Acknowledge silently so the user gets feedback.
             sendmessage($from_id, '✅', $keyboard, 'HTML');
         }
+    }
+    return;
+} elseif (
+    // Custom automation button tapped on a REPLY keyboard: the bot receives the
+    // button's label as plain text (reply keyboards can't carry callback_data).
+    // Match it back to a custom button and fire the same message/event as the
+    // inline cbtn_ handler above. Only triggers on an exact, non-empty label
+    // match so it never clashes with normal menu buttons.
+    is_string($text) && $text !== ''
+    && function_exists('custom_button_by_label')
+    && ($cbBtnByText = custom_button_by_label($text)) !== null
+) {
+    $btn = $cbBtnByText;
+    if (!empty($btn['url'])) {
+        // A reply button can't open a URL inline, so send it as a link.
+        $linkKb = json_encode(['inline_keyboard' => [[['text' => $btn['label'], 'url' => $btn['url']]]]]);
+        sendmessage($from_id, $btn['label'], $linkKb, 'HTML');
+    }
+    if (!empty($btn['event']) && function_exists('emit_event')) {
+        emit_event($btn['event'] !== '' ? $btn['event'] : 'custom.trigger', [
+            'button_id' => $btn['id'],
+            'label'     => $btn['label'],
+            'user_id'   => (string) $from_id,
+            'username'  => (string) ($user['username'] ?? ''),
+            'balance'   => (int) ($user['Balance'] ?? 0),
+        ]);
+    }
+    if (!empty($btn['message'])) {
+        sendmessage($from_id, $btn['message'], $keyboard, 'HTML');
+    } elseif (empty($btn['url']) && !empty($btn['event'])) {
+        sendmessage($from_id, '✅', $keyboard, 'HTML');
     }
     return;
 } elseif (preg_match('/locationnotuser_(.*)/', $datain, $dataget)) {

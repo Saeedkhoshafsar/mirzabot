@@ -139,6 +139,32 @@ $customButtons = function_exists('automation_buttons') ? automation_buttons(0) :
                 </div>
             <?php endif; ?>
 
+            <!-- Live list of what is ACTUALLY saved right now, so it's obvious the
+                 button persisted and WHERE it shows up (inside the Telegram bot,
+                 under the main menu — NOT in the drag-sort grid below). -->
+            <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:12px 14px;margin-bottom:16px">
+                <div style="font-size:13px;color:#1e3a8a;font-weight:bold;margin-bottom:8px">
+                    🔵 دکمه‌های ذخیره‌شده‌ی فعلی (<?= count($customButtons) ?>):
+                </div>
+                <?php if (empty($customButtons)): ?>
+                    <div style="font-size:13px;color:#64748b">هنوز دکمه‌ای ذخیره نشده است.</div>
+                <?php else: ?>
+                    <div style="display:flex;flex-wrap:wrap;gap:8px">
+                        <?php foreach ($customButtons as $b): ?>
+                            <span style="display:inline-flex;align-items:center;gap:6px;background:#fff;border:1px solid #93c5fd;border-radius:20px;padding:6px 14px;font-size:13px;color:#0f172a">
+                                <?= !empty($b['active']) ? '🟢' : '⚪️' ?>
+                                <?= htmlspecialchars((string) ($b['label'] ?? '')) ?>
+                                <?php if (!empty($b['url'])): ?><span style="color:#2563eb">🔗</span><?php endif; ?>
+                            </span>
+                        <?php endforeach; ?>
+                    </div>
+                    <div style="font-size:12px;color:#1e40af;margin-top:10px;line-height:1.8">
+                        ℹ️ این دکمه‌ها <b>داخل خود ربات تلگرام</b>، زیر منوی اصلی (به‌صورت دکمه شیشه‌ای) به کاربر نشان داده می‌شوند.
+                        در ربات <code>/start</code> بزنید تا ببینیدشان. (در کادر «ترتیب دکمه‌های اصلی» پایین صفحه نمایش داده نمی‌شوند.)
+                    </div>
+                <?php endif; ?>
+            </div>
+
             <form method="post" action="keyboard.php">
                 <input type="hidden" name="cb_save" value="1">
                 <div id="cb-rows">

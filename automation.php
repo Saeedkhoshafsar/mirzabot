@@ -351,6 +351,25 @@ function automation_button($id, $bot_id = null)
     return null;
 }
 
+/**
+ * Find a single active custom button by its exact label. Used to handle taps
+ * on reply-keyboard custom buttons, where the bot receives the button text
+ * instead of a callback_data. Returns null when no active button matches.
+ */
+function custom_button_by_label($label, $bot_id = null)
+{
+    $label = (string) $label;
+    if ($label === '') {
+        return null;
+    }
+    foreach (automation_buttons($bot_id) as $b) {
+        if ($b['active'] && $b['label'] === $label) {
+            return $b;
+        }
+    }
+    return null;
+}
+
 /** Recent delivery log rows for the panel. */
 function automation_recent_logs($limit = 50, $bot_id = null)
 {
