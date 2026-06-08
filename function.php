@@ -2533,6 +2533,105 @@ function panel_is_shop()
 }
 
 /**
+ * Ready-made setup presets (step 9). Each preset bundles a profile with sane
+ * default terminology and currency so a fresh install can be configured in one
+ * click via the setup wizard (panel/wizard.php). Presets never overwrite the
+ * VPN flow logic — they only seed display terms, currency and the panel mode.
+ */
+function panel_presets()
+{
+    return [
+        'vpn' => [
+            'label'    => 'فروش VPN',
+            'mode'     => 'vpn',
+            'currency' => 'تومان',
+            'terms'    => [
+                'customer' => 'کاربر', 'product' => 'سرویس', 'service' => 'سرویس',
+                'order'    => 'سفارش', 'wallet'  => 'کیف پول', 'store' => 'فروشگاه',
+            ],
+        ],
+        'shop' => [
+            'label'    => 'آنلاین‌شاپ (کالای فیزیکی)',
+            'mode'     => 'shop',
+            'currency' => 'تومان',
+            'terms'    => [
+                'customer' => 'مشتری', 'product' => 'محصول', 'service' => 'کالا',
+                'order'    => 'سفارش', 'wallet'  => 'کیف پول', 'store' => 'فروشگاه',
+            ],
+        ],
+        'digital' => [
+            'label'    => 'فروش فایل/دیجیتال',
+            'mode'     => 'digital',
+            'currency' => 'تومان',
+            'terms'    => [
+                'customer' => 'کاربر', 'product' => 'فایل', 'service' => 'محصول',
+                'order'    => 'خرید', 'wallet'  => 'کیف پول', 'store' => 'فروشگاه',
+            ],
+        ],
+        'channel' => [
+            'label'    => 'کانال/اشتراک',
+            'mode'     => 'channel',
+            'currency' => 'تومان',
+            'terms'    => [
+                'customer' => 'عضو', 'product' => 'اشتراک', 'service' => 'اشتراک',
+                'order'    => 'اشتراک', 'wallet'  => 'کیف پول', 'store' => 'کانال',
+            ],
+        ],
+        'custom' => [
+            'label'    => 'سفارشی (محیط خالی)',
+            'mode'     => 'custom',
+            'currency' => 'تومان',
+            'terms'    => [
+                'customer' => 'کاربر', 'product' => 'آیتم', 'service' => 'آیتم',
+                'order'    => 'سفارش', 'wallet'  => 'کیف پول', 'store' => 'فروشگاه',
+            ],
+        ],
+    ];
+}
+
+/**
+ * Apply a setup preset in one shot: sets the panel mode, store terminology and
+ * currency. Scope: global (bot_id 0) by default, or a child bot. Returns true
+ * on success. Safe & idempotent — re-running just re-seeds the same values.
+ */
+function apply_panel_preset($preset_key, $bot_id = 0, $overrides = [])
+{
+    global $pdo;
+    $presets = panel_presets();
+    if (!isset($presets[$preset_key]) || !isset($pdo)) {
+        return false;
+    }
+    $preset   = $presets[$preset_key];
+    $mode     = $overrides['mode']     ?? $preset['mode'];
+    $currency = $overrides['currency'] ?? $preset['currency'];
+    $terms    = is_array($overrides['terms'] ?? null) ? $overrides['terms'] : $preset['terms'];
+
+    set_panel_mode($mode, $bot_id);
+    set_store_terminology($terms, $bot_id);
+
+    // Currency: global column, or per-bot setting JSON.
+    try {
+        if ((int) $bot_id > 0) {
+            $stmt = $pdo->prepare("SELECT setting FROM botsaz WHERE id = ? LIMIT 1");
+            $stmt->execute([(int) $bot_id]);
+            $brow = $stmt->fetch(PDO::FETCH_ASSOC);
+            $bset = ($brow && !empty($brow['setting'])) ? json_decode($brow['setting'], true) : [];
+            if (!is_array($bset)) {
+                $bset = [];
+            }
+            $bset['store_currency'] = $currency;
+            $pdo->prepare("UPDATE botsaz SET setting = ? WHERE id = ?")
+                ->execute([json_encode($bset, JSON_UNESCAPED_UNICODE), (int) $bot_id]);
+        } else {
+            $pdo->prepare("UPDATE setting SET store_currency = ?")->execute([$currency]);
+        }
+    } catch (Exception $e) {
+        error_log("apply_panel_preset currency error: " . $e->getMessage());
+    }
+    return true;
+}
+
+/**
  * Store currency label (e.g. "تومان"). Read from setting.store_currency.
  */
 function store_currency()
