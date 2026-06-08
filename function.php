@@ -2380,17 +2380,156 @@ function store_term($term, $default = null)
 }
 
 /**
- * Current store mode: 'vpn' (default, untouched VPN behaviour) or 'shop'.
- * Read from setting.store_mode. Used to decide whether to show generic shop UI.
+ * Registry of panel profiles (step 8e). A single install can run as several
+ * independent containers (Coolify) or as several child bots on one install;
+ * each carries its own profile that shapes the UX/terminology/default product
+ * type. 'vpn' keeps the original, untouched VPN behaviour.
+ *
+ * Each profile: label, default product_type for new products, and a short
+ * description shown in the panel.
+ */
+function panel_profiles()
+{
+    return [
+        'vpn' => [
+            'label'        => 'فروش VPN (پیش‌فرض)',
+            'product_type' => 'vpn',
+            'desc'         => 'رفتار اصلی ربات VPN — اکانت/کانفیگ، حجم، لوکیشن، اشتراک.',
+        ],
+        'shop' => [
+            'label'        => 'آنلاین‌شاپ (کالای فیزیکی)',
+            'product_type' => 'physical',
+            'desc'         => 'فروش کالای فیزیکی با آدرس پستی، کد رهگیری و موجودی.',
+        ],
+        'digital' => [
+            'label'        => 'فروش فایل/دیجیتال',
+            'product_type' => 'digital_file',
+            'desc'         => 'فروش فایل، کد/سریال لایسنس و محصولات دانلودی.',
+        ],
+        'channel' => [
+            'label'        => 'کانال/اشتراک (زیرنویس، محتوا)',
+            'product_type' => 'service',
+            'desc'         => 'فروش اشتراک کانال یا دسترسی به محتوا/خدمت.',
+        ],
+        'custom' => [
+            'label'        => 'سفارشی (محیط خالی)',
+            'product_type' => 'service',
+            'desc'         => 'محیط بدون پیش‌فرض؛ خودتان با ویرایش پنل و دکمه‌ها می‌سازید.',
+        ],
+    ];
+}
+
+/** True if a profile code is known. */
+function is_valid_panel_mode($mode)
+{
+    return array_key_exists((string) $mode, panel_profiles());
+}
+
+/**
+ * Resolve the active panel profile for this install/bot, in priority order:
+ *   1. ENV  PANEL_MODE        (single-container / Coolify scenario)
+ *   2. botsaz.setting.panel_mode  (per-child-bot, multi-bot scenario)
+ *   3. setting.store_mode     (global, legacy)
+ *   4. 'vpn'                  (default — keeps VPN behaviour untouched)
+ */
+function panel_mode()
+{
+    static $cached = null;
+    if ($cached !== null) {
+        return $cached;
+    }
+    global $pdo, $setting;
+
+    // 1) Environment variable (best for Coolify per-container deploys).
+    $env = getenv('PANEL_MODE');
+    if ($env !== false && is_valid_panel_mode($env)) {
+        return $cached = $env;
+    }
+
+    // 2) Per-bot profile in botsaz.setting JSON (child bots).
+    $bot_id = defined('BOT_ID') ? (int) BOT_ID : 0;
+    if ($bot_id > 0 && isset($pdo)) {
+        try {
+            $stmt = $pdo->prepare("SELECT setting FROM botsaz WHERE id = ? LIMIT 1");
+            $stmt->execute([$bot_id]);
+            $brow = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($brow && !empty($brow['setting'])) {
+                $bset = json_decode($brow['setting'], true);
+                if (is_array($bset) && !empty($bset['panel_mode']) && is_valid_panel_mode($bset['panel_mode'])) {
+                    return $cached = $bset['panel_mode'];
+                }
+            }
+        } catch (Exception $e) {
+            // ignore, fall through
+        }
+    }
+
+    // 3) Global setting (legacy store_mode), then 4) default.
+    if (is_array($setting) && !empty($setting['store_mode']) && is_valid_panel_mode($setting['store_mode'])) {
+        return $cached = $setting['store_mode'];
+    }
+    $row = select("setting", "store_mode", null, null, "FETCH_COLUMN");
+    return $cached = (is_valid_panel_mode($row) ? $row : 'vpn');
+}
+
+/**
+ * Persist the panel profile. For a child bot (bot_id > 0) it is written into
+ * botsaz.setting JSON; otherwise into the global setting.store_mode column.
+ * Returns true on success.
+ */
+function set_panel_mode($mode, $bot_id = null)
+{
+    global $pdo;
+    if (!is_valid_panel_mode($mode) || !isset($pdo)) {
+        return false;
+    }
+    if ($bot_id === null) {
+        $bot_id = defined('BOT_ID') ? (int) BOT_ID : 0;
+    }
+    try {
+        if ((int) $bot_id > 0) {
+            $stmt = $pdo->prepare("SELECT setting FROM botsaz WHERE id = ? LIMIT 1");
+            $stmt->execute([(int) $bot_id]);
+            $brow = $stmt->fetch(PDO::FETCH_ASSOC);
+            $bset = ($brow && !empty($brow['setting'])) ? json_decode($brow['setting'], true) : [];
+            if (!is_array($bset)) {
+                $bset = [];
+            }
+            $bset['panel_mode'] = $mode;
+            $pdo->prepare("UPDATE botsaz SET setting = ? WHERE id = ?")
+                ->execute([json_encode($bset, JSON_UNESCAPED_UNICODE), (int) $bot_id]);
+            return true;
+        }
+        // Global: keep store_mode (legacy column) as the source of truth.
+        $pdo->prepare("UPDATE setting SET store_mode = ?")->execute([$mode]);
+        return true;
+    } catch (Exception $e) {
+        error_log("set_panel_mode error: " . $e->getMessage());
+        return false;
+    }
+}
+
+/**
+ * Current store mode (back-compat alias). Now delegates to panel_mode() so the
+ * whole codebase resolves the profile consistently (ENV > per-bot > global).
  */
 function store_mode()
 {
-    global $setting;
-    if (is_array($setting) && !empty($setting['store_mode'])) {
-        return $setting['store_mode'];
-    }
-    $row = select("setting", "store_mode", null, null, "FETCH_COLUMN");
-    return $row ?: 'vpn';
+    return panel_mode();
+}
+
+/** Default product_type for the active profile (used by new-product UI). */
+function panel_default_product_type()
+{
+    $profiles = panel_profiles();
+    $mode = panel_mode();
+    return $profiles[$mode]['product_type'] ?? 'vpn';
+}
+
+/** True when the active profile is anything other than plain VPN. */
+function panel_is_shop()
+{
+    return panel_mode() !== 'vpn';
 }
 
 /**

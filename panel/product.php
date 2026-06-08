@@ -230,9 +230,10 @@ include __DIR__ . '/inc/layout_head.php';
           </div>
           <div class="field full">
             <label>نوع محصول</label>
+            <?php $defaultPType = function_exists('panel_default_product_type') ? panel_default_product_type() : 'vpn'; ?>
             <select name="product_type" id="add_ptype" class="select" onchange="renderAttrFields('add')">
               <?php foreach (product_types() as $tk => $td): ?>
-                <option value="<?= htmlspecialchars($tk) ?>"><?= htmlspecialchars($td['label']) ?></option>
+                <option value="<?= htmlspecialchars($tk) ?>" <?= $tk === $defaultPType ? 'selected' : '' ?>><?= htmlspecialchars($td['label']) ?></option>
               <?php endforeach; ?>
             </select>
           </div>
@@ -338,5 +339,14 @@ include __DIR__ . '/inc/layout_head.php';
   window.PRODUCT_TYPES = <?= json_encode(product_types(), JSON_UNESCAPED_UNICODE) ?>;
 </script>
 <script src="js/product.js"></script>
+<script>
+  // Render attribute fields for the profile-preselected type in the add form
+  // so the right fields appear immediately (step 8e: profile shapes the UI).
+  document.addEventListener('DOMContentLoaded', function () {
+    if (typeof renderAttrFields === 'function' && document.getElementById('add_ptype')) {
+      renderAttrFields('add');
+    }
+  });
+</script>
 
 <?php include __DIR__ . '/inc/layout_foot.php'; ?>
