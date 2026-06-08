@@ -318,6 +318,190 @@ $nodeTypes = flow_node_types();
         .react-flow__attribution {
             display: none;
         }
+
+        /* ---- Side panel (create / edit node) ---- */
+        .side {
+            position: absolute;
+            top: 0;
+            inset-inline-end: 0;
+            bottom: 0;
+            width: 360px;
+            max-width: 90vw;
+            background: #111827;
+            border-inline-start: 1px solid #334155;
+            box-shadow: -8px 0 24px rgba(0, 0, 0, .4);
+            z-index: 20;
+            display: flex;
+            flex-direction: column;
+            transform: translateX(-100%);
+            transition: transform .18s ease;
+        }
+
+        html[dir=rtl] .side {
+            transform: translateX(100%);
+        }
+
+        .side.open {
+            transform: translateX(0);
+        }
+
+        .side-head {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 14px;
+            border-bottom: 1px solid #334155;
+        }
+
+        .side-head h2 {
+            font-size: 14px;
+            margin: 0;
+            font-weight: 700;
+            flex: 1;
+        }
+
+        .side-body {
+            padding: 14px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .side-foot {
+            padding: 12px 14px;
+            border-top: 1px solid #334155;
+            display: flex;
+            gap: 8px;
+        }
+
+        .fld {
+            margin-bottom: 12px;
+        }
+
+        .fld label {
+            display: block;
+            font-size: 12px;
+            color: #cbd5e1;
+            margin-bottom: 5px;
+            font-weight: 600;
+        }
+
+        .fld .hlp {
+            font-size: 10.5px;
+            color: #7c8aa0;
+            margin-top: 3px;
+            line-height: 1.6;
+        }
+
+        .fld input[type=text],
+        .fld input[type=number],
+        .fld textarea,
+        .fld select {
+            width: 100%;
+            background: #1e293b;
+            border: 1px solid #475569;
+            border-radius: 8px;
+            color: #e2e8f0;
+            padding: 8px 10px;
+            font-size: 13px;
+        }
+
+        .fld textarea {
+            resize: vertical;
+            min-height: 60px;
+        }
+
+        .fld.row {
+            display: flex;
+            gap: 8px;
+        }
+
+        .fld.row>div {
+            flex: 1;
+        }
+
+        .chk {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            font-size: 12.5px;
+            color: #cbd5e1;
+            cursor: pointer;
+            margin-bottom: 8px;
+        }
+
+        .chk input {
+            width: 16px;
+            height: 16px;
+            accent-color: #2563eb;
+        }
+
+        .grp {
+            border: 1px solid #334155;
+            border-radius: 10px;
+            padding: 10px 12px 4px;
+            margin-bottom: 14px;
+        }
+
+        .grp .grp-t {
+            font-size: 11.5px;
+            font-weight: 700;
+            color: #93c5fd;
+            margin-bottom: 9px;
+        }
+
+        .btn {
+            border-radius: 9px;
+            padding: 9px 14px;
+            font-size: 13px;
+            cursor: pointer;
+            border: 1px solid #475569;
+            background: #334155;
+            color: #e2e8f0;
+        }
+
+        .btn.primary {
+            background: #2563eb;
+            border-color: #3b82f6;
+            color: #fff;
+            font-weight: 700;
+            flex: 1;
+        }
+
+        .btn.danger {
+            background: #7f1d1d;
+            border-color: #b91c1c;
+            color: #fecaca;
+        }
+
+        .btn:hover {
+            filter: brightness(1.12);
+        }
+
+        .sys-warn {
+            background: #422006;
+            border: 1px solid #b45309;
+            color: #fde68a;
+            font-size: 11.5px;
+            border-radius: 8px;
+            padding: 8px 10px;
+            margin-bottom: 12px;
+            line-height: 1.7;
+        }
+
+        .toolbar-tip {
+            position: absolute;
+            top: 14px;
+            inset-inline-start: 14px;
+            background: rgba(30, 41, 59, .9);
+            border: 1px solid #334155;
+            border-radius: 10px;
+            padding: 8px 12px;
+            font-size: 11px;
+            z-index: 5;
+            color: #94a3b8;
+            line-height: 1.8;
+            max-width: 230px;
+        }
     </style>
 </head>
 
@@ -328,13 +512,18 @@ $nodeTypes = flow_node_types();
             <h1>🌳 ویرایشگر بصری دکمه‌های ربات</h1>
             <span id="status" class="status saved">ذخیره‌شده</span>
             <span class="spacer"></span>
-            <span class="hint">نودها را بکشید تا جابه‌جا شوند</span>
+            <span class="hint">دابل‌کلیک=ویرایش • از پورت پایین بکشید=فرزند</span>
+            <button id="btn-add" class="tb-btn" title="افزودن نود ریشه‌ای جدید">➕ نود جدید</button>
             <button id="btn-migrate" class="tb-btn" title="ساخت درخت از دکمه‌های قدیمی">وارد کردن دکمه‌های قبلی</button>
             <button id="btn-reload" class="tb-btn">بارگذاری مجدد</button>
             <button id="btn-save" class="tb-btn primary" disabled>💾 ذخیره</button>
         </div>
         <div class="canvas-wrap">
             <div id="root" style="position:absolute;inset:0"></div>
+            <div class="toolbar-tip">
+                💡 برای ساخت زیرشاخه، از نقطهٔ پایین یک نود بکشید و در فضای خالی رها کنید.
+                دابل‌کلیک روی نود = ویرایش. انتخاب + کلید Delete = حذف.
+            </div>
             <div class="legend">
                 <div><i style="background:#3b82f6"></i>دکمه &nbsp; <i style="background:#22c55e"></i>پیام
                     &nbsp; <i style="background:#a855f7"></i>اکشن</div>

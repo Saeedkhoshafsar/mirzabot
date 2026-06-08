@@ -425,6 +425,8 @@ function flow_normalise_config(array $c, $type)
         $out['force_reply']       = !empty($c['force_reply']);
         $out['error_message']     = (string) ($c['error_message'] ?? '');
         $out['input_tag']         = (string) ($c['input_tag'] ?? '');
+        // Prompt shown to the user when this input step is reached (what to send).
+        $out['prompt']            = (string) ($c['prompt'] ?? '');
 
         // --- File constraints (only meaningful when a file is allowed) ---
         // Admin-defined allow-list of extensions, normalised to lowercase,
