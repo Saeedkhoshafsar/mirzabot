@@ -114,6 +114,9 @@ function get_automation_config($bot_id = null)
                     : json_decode((string) $setting['automation_config'], true);
             } else {
                 $row = select("setting", "automation_config", null, null, "FETCH_COLUMN");
+                if (is_array($row)) {
+                    $row = $row[0] ?? null;
+                }
                 if ($row) {
                     $raw = json_decode((string) $row, true);
                 }

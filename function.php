@@ -2469,6 +2469,9 @@ function panel_mode()
         return $cached = $setting['store_mode'];
     }
     $row = select("setting", "store_mode", null, null, "FETCH_COLUMN");
+    if (is_array($row)) {
+        $row = $row[0] ?? null;
+    }
     return $cached = (is_valid_panel_mode($row) ? $row : 'vpn');
 }
 
@@ -2641,6 +2644,9 @@ function store_currency()
         return $setting['store_currency'];
     }
     $row = select("setting", "store_currency", null, null, "FETCH_COLUMN");
+    if (is_array($row)) {
+        $row = $row[0] ?? null;
+    }
     return $row ?: 'تومان';
 }
 
@@ -3603,6 +3609,9 @@ function get_shipping_config($bot_id = null)
                     : json_decode((string) $setting['store_shipping'], true);
             } else {
                 $row = select("setting", "store_shipping", null, null, "FETCH_COLUMN");
+                if (is_array($row)) {
+                    $row = $row[0] ?? null;
+                }
                 if ($row) {
                     $raw = json_decode((string) $row, true);
                 }

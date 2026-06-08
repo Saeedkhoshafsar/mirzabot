@@ -1237,16 +1237,7 @@ To hide a panel, select your panels from the list below, then send the /end_hide
                         'ok_success_user_10' => '✅ The user was successfully removed from the list.',
                         'err_notfound_user_6' => '❌ There is no user in the list',
                         'btn_27' => 'List of people👇',
-                        'msg_panel_admin_bot_report' => '💎 | Version Bot: %s
-📌 | Version Mini App: 0.1.1
-
-<blockquote>🔹 | This bot is completely free and is developed by the Mirza team</blockquote>
-
-<blockquote>🔹 | Any sale or charging of money for this bot is considered a violation.</blockquote>
-
-<blockquote>🔹 | If you see any sale or charging of money, please track and reclaim your money.</blockquote>
-
-<blockquote>🐞 | If you encounter a bug or problem in the bot\'s operation, contact us via the **📬 Bot report** button in the admin panel.</blockquote>',
+                        'msg_panel_admin_bot_report' => '🤖 | Welcome to the admin panel',
                         'ok_payment_gateway_name' => '
 📌 Gateway name: <code>%s</code>
  - Number of successful payments: <code>%s</code>

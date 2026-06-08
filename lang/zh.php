@@ -1237,16 +1237,7 @@ f,n.n2',
                         'ok_success_user_10' => '✅ 该用户已成功从列表中移除。',
                         'err_notfound_user_6' => '❌ 列表中没有用户',
                         'btn_27' => '人员列表👇',
-                        'msg_panel_admin_bot_report' => '💎 | Version Bot: %s
-📌 | Version Mini App: 0.1.1
-
-<blockquote>🔹 | 此机器人完全免费，由 Mirza 团队开发</blockquote>
-
-<blockquote>🔹 | 任何对此机器人的出售或收费均视为违规。</blockquote>
-
-<blockquote>🔹 | 如果您发现任何出售或收费行为，请追踪并追回您的款项。</blockquote>
-
-<blockquote>🐞 | 如果您在机器人运行中遇到错误或问题，请通过管理面板中的 **📬 机器人反馈** 按钮联系我们。</blockquote>',
+                        'msg_panel_admin_bot_report' => '🤖 | 欢迎来到管理面板',
                         'ok_payment_gateway_name' => '
 📌 网关名称：<code>%s</code>
  - 成功支付次数：<code>%s</code>

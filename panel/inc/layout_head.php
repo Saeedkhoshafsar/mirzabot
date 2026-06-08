@@ -130,20 +130,17 @@ $initials = mb_strtoupper(mb_substr($currentUser, 0, 1, 'UTF-8'), 'UTF-8');
               <?= icon('settings') ?>
             </span><span class="nav-label"><?= $textbotlang['panel']['layoutThemeToggleLabel'] ?></span>
           </a>
+<?php
+          // Store-only navigation. These pages are only meaningful when the
+          // panel is NOT in plain VPN mode. The mode is decided by the
+          // PANEL_MODE env var (see panel_mode()) — no in-panel switching.
+          $__isShop = function_exists('panel_is_shop') ? panel_is_shop() : false;
+          if ($__isShop):
+          ?>
           <a href="labels.php" class="nav-item <?= $activeNav === 'labels' ? 'active' : '' ?>"
             title="برندینگ و اصطلاحات">
             <span class="nav-icon"><?= icon('edit') ?></span><span
               class="nav-label">برندینگ و اصطلاحات</span>
-          </a>
-          <a href="wizard.php" class="nav-item <?= $activeNav === 'wizard' ? 'active' : '' ?>"
-            title="راه‌اندازی سریع">
-            <span class="nav-icon"><?= icon('check') ?></span><span
-              class="nav-label">راه‌اندازی سریع</span>
-          </a>
-          <a href="store.php" class="nav-item <?= $activeNav === 'store' ? 'active' : '' ?>"
-            title="تنظیمات فروشگاه و حالت پنل">
-            <span class="nav-icon"><?= icon('dashboard') ?></span><span
-              class="nav-label">تنظیمات فروشگاه</span>
           </a>
           <a href="discounts.php" class="nav-item <?= $activeNav === 'discounts' ? 'active' : '' ?>"
             title="کدهای تخفیف">
@@ -160,6 +157,7 @@ $initials = mb_strtoupper(mb_substr($currentUser, 0, 1, 'UTF-8'), 'UTF-8');
             <span class="nav-icon"><?= icon('package') ?></span><span
               class="nav-label">حمل‌ونقل</span>
           </a>
+          <?php endif; ?>
           <a href="automation.php" class="nav-item <?= $activeNav === 'automation' ? 'active' : '' ?>"
             title="اتوماسیون، Webhook و اتصال n8n">
             <span class="nav-icon"><?= icon('zap') ?></span><span
