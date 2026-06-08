@@ -375,6 +375,28 @@ function flow_normalise_tree($raw)
         }
     }
 
+    // Auto-link condition branches to their children by connection order, so
+    // the admin only labels branches in the form and we resolve the 'goto'
+    // node ids from the actual edges here (kept in sync automatically).
+    $childOrder = [];
+    foreach ($edges as $e) {
+        $childOrder[$e['source']][] = $e['target'];
+    }
+    foreach ($nodes as $i => $n) {
+        if (($n['type'] ?? '') !== 'condition') {
+            continue;
+        }
+        $children = $childOrder[$n['id']] ?? [];
+        $branches = $n['config']['branches'] ?? [];
+        if (!is_array($branches)) {
+            $branches = [];
+        }
+        foreach ($branches as $bi => $b) {
+            $branches[$bi]['goto'] = isset($children[$bi]) ? (string) $children[$bi] : '';
+        }
+        $nodes[$i]['config']['branches'] = $branches;
+    }
+
     return [
         'nodes' => $nodes,
         'edges' => $edges,
@@ -475,15 +497,38 @@ function flow_normalise_config(array $c, $type)
     }
 
     if ($type === 'condition') {
+        // What value the condition is evaluated against at runtime:
+        //   'input'  -> a previously collected input (by key, condition_source_key)
+        //   'n8n'    -> a field from the last n8n response (by key)
+        //   'last'   -> the most recent user input
+        $src = (string) ($c['condition_source'] ?? 'last');
+        if (!in_array($src, ['input', 'n8n', 'last'], true)) {
+            $src = 'last';
+        }
+        $out['condition_source']     = $src;
+        $out['condition_source_key'] = (string) ($c['condition_source_key'] ?? '');
+        $out['message']              = (string) ($c['message'] ?? '');
+
+        // Ordered branches: first matching branch wins; an empty 'op' is the
+        // default/else branch (should be placed last). Each branch points to a
+        // child node id via 'goto'.
+        $allowedOps = ['eq', 'neq', 'contains', 'not_contains', 'gt', 'gte',
+            'lt', 'lte', 'regex', 'empty', 'not_empty', 'is_valid', 'is_invalid', 'else'];
         $branches = [];
         if (!empty($c['branches']) && is_array($c['branches'])) {
             foreach ($c['branches'] as $b) {
-                if (!is_array($b) || empty($b['goto'])) {
+                if (!is_array($b)) {
                     continue;
                 }
+                $op = (string) ($b['op'] ?? ($b['when'] !== '' ? 'eq' : 'else'));
+                if (!in_array($op, $allowedOps, true)) {
+                    $op = 'eq';
+                }
                 $branches[] = [
-                    'when' => (string) ($b['when'] ?? ''),
-                    'goto' => (string) $b['goto'],
+                    'label' => (string) ($b['label'] ?? ''),     // human label (e.g. "معتبر")
+                    'op'    => $op,                                // comparison operator
+                    'value' => (string) ($b['value'] ?? ($b['when'] ?? '')), // compare-to value
+                    'goto'  => (string) ($b['goto'] ?? ''),       // child node id (may be empty until linked)
                 ];
             }
         }
@@ -491,6 +536,76 @@ function flow_normalise_config(array $c, $type)
     }
 
     return $out;
+}
+
+/**
+ * Evaluate a condition node's branches against a runtime value.
+ * Returns the index of the first matching branch, or -1 if none matched.
+ * $value is the resolved value (input/n8n/last). $valid is an optional bool
+ * used by the is_valid / is_invalid operators (e.g. did the previous input
+ * pass validation, or did n8n report success).
+ */
+function flow_eval_condition(array $cfg, $value, $valid = null)
+{
+    $branches = isset($cfg['branches']) && is_array($cfg['branches']) ? $cfg['branches'] : [];
+    $value = (string) $value;
+    foreach ($branches as $i => $b) {
+        $op = (string) ($b['op'] ?? 'eq');
+        $cmp = (string) ($b['value'] ?? '');
+        $match = false;
+        switch ($op) {
+            case 'else':
+                $match = true;
+                break;
+            case 'eq':
+                $match = ($value === $cmp);
+                break;
+            case 'neq':
+                $match = ($value !== $cmp);
+                break;
+            case 'contains':
+                $match = ($cmp !== '' && mb_strpos($value, $cmp) !== false);
+                break;
+            case 'not_contains':
+                $match = ($cmp === '' || mb_strpos($value, $cmp) === false);
+                break;
+            case 'gt':
+                $match = is_numeric($value) && is_numeric($cmp) && ($value + 0) > ($cmp + 0);
+                break;
+            case 'gte':
+                $match = is_numeric($value) && is_numeric($cmp) && ($value + 0) >= ($cmp + 0);
+                break;
+            case 'lt':
+                $match = is_numeric($value) && is_numeric($cmp) && ($value + 0) < ($cmp + 0);
+                break;
+            case 'lte':
+                $match = is_numeric($value) && is_numeric($cmp) && ($value + 0) <= ($cmp + 0);
+                break;
+            case 'regex':
+                if ($cmp !== '') {
+                    $delim = '~';
+                    $safe = str_replace($delim, '\\' . $delim, $cmp);
+                    $match = (@preg_match($delim . $safe . $delim . 'u', $value) === 1);
+                }
+                break;
+            case 'empty':
+                $match = ($value === '');
+                break;
+            case 'not_empty':
+                $match = ($value !== '');
+                break;
+            case 'is_valid':
+                $match = ($valid === true);
+                break;
+            case 'is_invalid':
+                $match = ($valid === false);
+                break;
+        }
+        if ($match) {
+            return (int) $i;
+        }
+    }
+    return -1;
 }
 
 /**
@@ -603,6 +718,132 @@ function flow_node(array $tree, $id)
 function flow_root_id(array $tree)
 {
     return (string) ($tree['meta']['root'] ?? 'n_root');
+}
+
+/**
+ * Build the parent chain (ancestor ids) from the root down to $nodeId,
+ * inclusive. Uses each node's 'parent' link (which is rebuilt from edges on
+ * save, so it is reliable). Returns an ordered array of node ids.
+ */
+function flow_path_ids(array $tree, $nodeId)
+{
+    $byId = flow_index_nodes($tree);
+    $chain = [];
+    $cur = (string) $nodeId;
+    $guard = 0;
+    while ($cur !== '' && isset($byId[$cur]) && $guard < 500) {
+        array_unshift($chain, $cur);
+        $parent = $byId[$cur]['parent'] ?? null;
+        $cur = $parent ? (string) $parent : '';
+        $guard++;
+    }
+    return $chain;
+}
+
+/**
+ * Build the human-readable breadcrumb (labels) from root to $nodeId, e.g.
+ * ["خرید", "نقدی", "درگاه", "بانک ملی"]. This is what an n8n node forwards.
+ */
+function flow_breadcrumb(array $tree, $nodeId)
+{
+    $byId = flow_index_nodes($tree);
+    $labels = [];
+    foreach (flow_path_ids($tree, $nodeId) as $id) {
+        if (isset($byId[$id])) {
+            $labels[] = (string) ($byId[$id]['label'] ?? '');
+        }
+    }
+    return $labels;
+}
+
+/**
+ * Assemble the JSON payload an n8n node sends. Includes (optionally) the
+ * breadcrumb path and the collected user inputs, plus identifying context.
+ * $cfg = the n8n node config; $ctx = ['bot_id','user_id','node_id',
+ * 'inputs'=>[key=>val], 'callback_url'=>...].
+ */
+function flow_n8n_payload(array $tree, array $cfg, array $ctx)
+{
+    $nodeId = (string) ($ctx['node_id'] ?? '');
+    $payload = [
+        'bot_id'   => $ctx['bot_id'] ?? 0,
+        'user_id'  => $ctx['user_id'] ?? null,
+        'node_id'  => $nodeId,
+        'tag'      => (string) ($cfg['n8n_tag'] ?? ''),
+        'mode'     => (string) ($cfg['n8n_mode'] ?? 'async'),
+        'ts'       => time(),
+    ];
+    if (!empty($cfg['send_path'])) {
+        $payload['path']      = flow_breadcrumb($tree, $nodeId);
+        $payload['path_ids']  = flow_path_ids($tree, $nodeId);
+    }
+    if (!empty($cfg['send_inputs'])) {
+        $payload['inputs'] = isset($ctx['inputs']) && is_array($ctx['inputs']) ? $ctx['inputs'] : [];
+    }
+    if ($payload['mode'] === 'async' && !empty($ctx['callback_url'])) {
+        $payload['callback_url'] = (string) $ctx['callback_url'];
+    }
+    return $payload;
+}
+
+/**
+ * Send an n8n payload to the configured endpoint.
+ * - async: fire-and-forget POST with a very short timeout so the bot never
+ *   blocks; n8n is expected to call us back on the callback_url later.
+ * - sync : POST and wait up to n8n_timeout_sec for a JSON response.
+ * Returns ['ok'=>bool, 'mode'=>..., 'response'=>array|null, 'error'=>code|null].
+ * Never throws.
+ */
+function flow_n8n_send(array $cfg, array $payload)
+{
+    $url = trim((string) ($cfg['n8n_endpoint'] ?? ''));
+    if ($url === '' || !preg_match('~^https?://~i', $url)) {
+        return ['ok' => false, 'mode' => $cfg['n8n_mode'] ?? 'async', 'response' => null, 'error' => 'bad_endpoint'];
+    }
+    $mode = (string) ($cfg['n8n_mode'] ?? 'async');
+    $body = json_encode($payload, JSON_UNESCAPED_UNICODE);
+
+    if (!function_exists('curl_init')) {
+        return ['ok' => false, 'mode' => $mode, 'response' => null, 'error' => 'no_curl'];
+    }
+
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_POST           => true,
+        CURLOPT_POSTFIELDS     => $body,
+        CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_NOSIGNAL       => true,
+    ]);
+
+    if ($mode === 'async') {
+        // Fire-and-forget: tiny timeout, we don't care about the body. n8n will
+        // reach back via callback_url. This keeps the bot responsive under load.
+        curl_setopt($ch, CURLOPT_TIMEOUT_MS, 800);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT_MS, 700);
+        @curl_exec($ch);
+        curl_close($ch);
+        // We intentionally treat dispatch as success regardless of the short
+        // timeout; delivery is confirmed later by the callback.
+        return ['ok' => true, 'mode' => 'async', 'response' => null, 'error' => null];
+    }
+
+    // sync
+    $timeout = max(1, min(30, (int) ($cfg['n8n_timeout_sec'] ?? 5)));
+    curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, $timeout);
+    $raw = curl_exec($ch);
+    $errno = curl_errno($ch);
+    $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    if ($errno !== 0) {
+        return ['ok' => false, 'mode' => 'sync', 'response' => null, 'error' => ($errno === 28 ? 'timeout' : 'curl_err')];
+    }
+    if ($code < 200 || $code >= 300) {
+        return ['ok' => false, 'mode' => 'sync', 'response' => null, 'error' => 'http_' . $code];
+    }
+    $resp = json_decode((string) $raw, true);
+    return ['ok' => true, 'mode' => 'sync', 'response' => is_array($resp) ? $resp : null, 'error' => null];
 }
 
 /* ------------------------------------------------------------------ */

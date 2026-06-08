@@ -258,6 +258,58 @@
         'شناسهٔ یک عملیات داخلی ربات که هنگام رسیدن به این نود اجرا می‌شود.'));
     }
 
+    if (d.type === 'condition') {
+      var branches = Array.isArray(cfg.branches) ? cfg.branches : [];
+      function setBranches(arr) { setCfg('branches', arr); }
+      function updBranch(i, k, v) {
+        var copy = branches.map(function (b, j) { return j === i ? Object.assign({}, b, (function () { var o = {}; o[k] = v; return o; })()) : b; });
+        setBranches(copy);
+      }
+      function addBranch() { setBranches(branches.concat([{ label: '', op: 'eq', value: '', goto: '' }])); }
+      function delBranch(i) { setBranches(branches.filter(function (_, j) { return j !== i; })); }
+
+      var OPS = [
+        ['eq', 'برابر است با'], ['neq', 'برابر نیست با'],
+        ['contains', 'شامل'], ['not_contains', 'شامل نیست'],
+        ['gt', 'بزرگ‌تر از'], ['gte', 'بزرگ‌تر/مساوی'],
+        ['lt', 'کوچک‌تر از'], ['lte', 'کوچک‌تر/مساوی'],
+        ['regex', 'الگوی Regex'], ['empty', 'خالی است'], ['not_empty', 'خالی نیست'],
+        ['is_valid', 'معتبر بود (ورودی/n8n)'], ['is_invalid', 'نامعتبر بود'],
+        ['else', 'در غیر این صورت (پیش‌فرض)']
+      ];
+      var noValue = { empty: 1, not_empty: 1, is_valid: 1, is_invalid: 1, else: 1 };
+
+      var branchRows = branches.map(function (b, i) {
+        return h('div', { key: 'br' + i, style: { border: '1px solid #334155', borderRadius: '8px', padding: '8px', marginBottom: '8px' } },
+          h('div', { className: 'fld row', style: { marginBottom: '6px' } },
+            h('div', null, h('input', { type: 'text', placeholder: 'برچسب شاخه (مثلاً: معتبر)', value: b.label || '', onChange: function (e) { updBranch(i, 'label', e.target.value); } })),
+            h('button', { className: 'btn danger', style: { padding: '4px 8px', flex: 'none' }, onClick: function () { delBranch(i); } }, '✕')),
+          h('div', { className: 'fld row', style: { marginBottom: noValue[b.op] ? '0' : '6px' } },
+            h('div', null, h('select', { value: b.op || 'eq', onChange: function (e) { updBranch(i, 'op', e.target.value); } },
+              OPS.map(function (o) { return h('option', { key: o[0], value: o[0] }, o[1]); }))),
+            (noValue[b.op] ? null : h('div', null, h('input', { type: 'text', placeholder: 'مقدار مقایسه', value: b.value || '', onChange: function (e) { updBranch(i, 'value', e.target.value); } })))),
+          h('div', { className: 'hlp' }, 'مقصد: فرزند شمارهٔ ' + (i + 1) + ' این نود (به ترتیب اتصال). برای ساخت مقصد، از پورت پایین این نود یک فرزند بکشید.')
+        );
+      });
+
+      rows.push(h('div', { className: 'grp', key: 'gcond' },
+        h('div', { className: 'grp-t' }, 'تنظیمات شرط (انشعاب)'),
+        field('منبع مقدار',
+          h('select', { value: cfg.condition_source || 'last', onChange: function (e) { setCfg('condition_source', e.target.value); } },
+            h('option', { value: 'last' }, 'آخرین ورودی کاربر'),
+            h('option', { value: 'input' }, 'یک ورودی ذخیره‌شده (با کلید)'),
+            h('option', { value: 'n8n' }, 'پاسخ n8n (با کلید)')),
+          'مقداری که شرط روی آن ارزیابی می‌شود.'),
+        (cfg.condition_source === 'input' || cfg.condition_source === 'n8n') ? field('کلید منبع',
+          h('input', { type: 'text', value: cfg.condition_source_key || '', placeholder: cfg.condition_source === 'n8n' ? 'مثلاً: status' : 'مثلاً: discount_code', onChange: function (e) { setCfg('condition_source_key', e.target.value); } })) : null,
+        field('پیام (اختیاری)',
+          h('input', { type: 'text', value: cfg.message || '', onChange: function (e) { setCfg('message', e.target.value); } })),
+        h('div', { style: { fontSize: '11.5px', color: '#93c5fd', margin: '4px 0 8px' } }, 'شاخه‌ها (اولین تطبیق برنده است):'),
+        branchRows,
+        h('button', { className: 'btn', style: { width: '100%' }, onClick: addBranch }, '➕ افزودن شاخه')
+      ));
+    }
+
     if (d.type === 'n8n') {
       rows.push(h('div', { className: 'grp', key: 'gn8n' },
         h('div', { className: 'grp-t' }, 'تنظیمات n8n'),
