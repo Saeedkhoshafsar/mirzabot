@@ -72,28 +72,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $new['endpoints'] = $endpoints;
 
-        // Rebuild custom buttons.
-        $buttons = [];
-        $bLabels = $_POST['btn_label']   ?? [];
-        $bEvents = $_POST['btn_event']   ?? [];
-        $bMsgs   = $_POST['btn_message'] ?? [];
-        $bUrls   = $_POST['btn_url']     ?? [];
-        $bActive = $_POST['btn_active']  ?? [];
-        foreach ($bLabels as $i => $lbl) {
-            $lbl = trim((string) $lbl);
-            if ($lbl === '') { continue; }
-            $url = trim((string) ($bUrls[$i] ?? ''));
-            if ($url !== '' && !preg_match('~^https?://~i', $url)) { $url = ''; }
-            $buttons[] = [
-                'id'      => 'b' . substr(md5($lbl . $i . microtime()), 0, 8),
-                'label'   => $lbl,
-                'event'   => trim((string) ($bEvents[$i] ?? '')),
-                'message' => trim((string) ($bMsgs[$i] ?? '')),
-                'url'     => $url,
-                'active'  => !empty($bActive[$i]),
-            ];
-        }
-        $new['buttons'] = $buttons;
+        // Custom buttons are managed on keyboard.php now — preserve whatever
+        // is already stored so saving the webhook settings here never wipes
+        // the buttons the admin created on the keyboard page.
+        $new['buttons'] = is_array($cfg['buttons'] ?? null) ? $cfg['buttons'] : [];
 
         if (set_automation_config($new, 0)) {
             flash('success', 'تنظیمات اتوماسیون ذخیره شد.');
@@ -195,41 +177,16 @@ include __DIR__ . '/inc/layout_head.php';
         </div>
     </div>
 
-    <!-- Custom buttons -------------------------------------------------- -->
+    <!-- Custom buttons moved to keyboard.php ---------------------------- -->
     <div class="card fade-up d3" style="margin-bottom:16px">
         <div class="card-head"><div><div class="card-title">دکمه‌های سفارشی ربات</div>
-            <div class="card-subtitle">دکمه‌هایی که در منوی اصلی ربات نمایش داده می‌شوند و می‌توانند رویداد n8n بزنند، پیام بفرستند یا لینک باز کنند</div></div></div>
+            <div class="card-subtitle">ساخت و ویرایش دکمه‌های دلخواه ربات به صفحهٔ «چیدمان کیبورد» منتقل شد</div></div></div>
         <div class="card-body">
-            <div class="notice" style="margin-bottom:12px">
-                نکته: نمایش دکمه‌ها در منو نیازمند فعال بودن حالت «دکمه‌های شیشه‌ای منوی اصلی»
-                (<code>inlinebtnmain = oninline</code>) است. اگر فقط لینک بدهید، دکمه مستقیم باز می‌شود؛
-                اگر رویداد بدهید، با کلیک کاربر، رویداد <code>custom.trigger</code> (یا رویداد دلخواه شما) به n8n می‌رود.
+            <div class="notice" style="margin-bottom:0">
+                برای افزودن یا ویرایش دکمه‌های دلخواه ربات (پیام، لینک یا رویداد n8n) به
+                <a href="keyboard.php#custom-buttons" style="font-weight:700">صفحهٔ چیدمان کیبورد</a> بروید.
+                هر دکمهٔ فعال هنگام کلیک، رویداد <code>custom.trigger</code> را برای n8n ارسال می‌کند.
             </div>
-            <div id="btn-list">
-                <?php
-                $btns = $cfg['buttons'] ?? [];
-                if (!$btns) { $btns = [['label' => '', 'event' => '', 'message' => '', 'url' => '', 'active' => true]]; }
-                foreach ($btns as $i => $b):
-                ?>
-                <div class="card btn-row" style="margin:0 0 12px;padding:12px;border:1px solid var(--bd)">
-                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-                        <div class="field"><label>متن دکمه</label>
-                            <input type="text" name="btn_label[<?= $i ?>]" class="input" value="<?= htmlspecialchars((string) ($b['label'] ?? '')) ?>" placeholder="مثلاً: درخواست مشاوره"></div>
-                        <div class="field"><label>رویداد n8n (اختیاری)</label>
-                            <input type="text" name="btn_event[<?= $i ?>]" class="input" value="<?= htmlspecialchars((string) ($b['event'] ?? '')) ?>" placeholder="custom.trigger"></div>
-                    </div>
-                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-                        <div class="field"><label>پیام پاسخ به کاربر (اختیاری)</label>
-                            <input type="text" name="btn_message[<?= $i ?>]" class="input" value="<?= htmlspecialchars((string) ($b['message'] ?? '')) ?>" placeholder="درخواست شما ثبت شد ✅"></div>
-                        <div class="field"><label>لینک (اختیاری — اگر پر شود دکمه لینک می‌شود)</label>
-                            <input type="url" name="btn_url[<?= $i ?>]" class="input" value="<?= htmlspecialchars((string) ($b['url'] ?? '')) ?>" placeholder="https://..."></div>
-                    </div>
-                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:4px">
-                        <input type="checkbox" name="btn_active[<?= $i ?>]" value="1" <?= !empty($b['active']) || !isset($b['active']) ? 'checked' : '' ?>> فعال</label>
-                </div>
-                <?php endforeach; ?>
-            </div>
-            <button type="button" id="add-btn" class="btn btn-ghost"><?= icon('plus') ?> افزودن دکمه</button>
         </div>
     </div>
 
@@ -339,24 +296,6 @@ document.getElementById('add-ep').addEventListener('click', function () {
         + '<div class="ep-events" data-idx="' + idx + '" style="display:none;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px;border-top:1px dashed var(--bd);padding-top:10px">' + evHtml + '</div>';
     list.appendChild(div);
     bindAllToggles(div);
-});
-
-// Add a new custom-button row.
-document.getElementById('add-btn').addEventListener('click', function () {
-    var list = document.getElementById('btn-list');
-    var idx = list.querySelectorAll('.btn-row').length;
-    var div = document.createElement('div');
-    div.className = 'card btn-row';
-    div.style = 'margin:0 0 12px;padding:12px;border:1px solid var(--bd)';
-    div.innerHTML =
-        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
-        + '<div class="field"><label>متن دکمه</label><input type="text" name="btn_label[' + idx + ']" class="input" placeholder="مثلاً: درخواست مشاوره"></div>'
-        + '<div class="field"><label>رویداد n8n (اختیاری)</label><input type="text" name="btn_event[' + idx + ']" class="input" placeholder="custom.trigger"></div></div>'
-        + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
-        + '<div class="field"><label>پیام پاسخ به کاربر (اختیاری)</label><input type="text" name="btn_message[' + idx + ']" class="input"></div>'
-        + '<div class="field"><label>لینک (اختیاری)</label><input type="url" name="btn_url[' + idx + ']" class="input" placeholder="https://..."></div></div>'
-        + '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:4px"><input type="checkbox" name="btn_active[' + idx + ']" value="1" checked> فعال</label>';
-    list.appendChild(div);
 });
 </script>
 
