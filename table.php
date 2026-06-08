@@ -311,6 +311,32 @@ timeauto_not_verify,status_keyboard_config,cron_status
     // free-shipping rules. Stored as JSON. Empty {} = no carrier configured
     // (VPN default behaviour is unaffected).
     addFieldToTable("setting", "store_shipping", "{}", "TEXT");
+    // --- Open automation layer (Step 11) ---
+    // Outbound webhook config (events -> n8n/Make/Zapier/any URL) + inbound API
+    // token (n8n -> this bot actions). All optional & disabled by default, so
+    // existing installs are completely unaffected.
+    addFieldToTable("setting", "automation_config", "{}", "TEXT");
+
+    // Automation delivery log: one row per outbound webhook attempt (for the
+    // panel's "recent deliveries" view + retry/debug). Created only if missing.
+    $tableName = 'automation_log';
+    $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_name = :tableName");
+    $stmt->bindParam(':tableName', $tableName);
+    $stmt->execute();
+    if (!$stmt->fetch(PDO::FETCH_ASSOC)) {
+        $pdo->prepare("CREATE TABLE automation_log (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            bot_id INT NOT NULL DEFAULT 0,
+            direction VARCHAR(10) NOT NULL DEFAULT 'out',
+            event VARCHAR(100) NOT NULL DEFAULT '',
+            target_url VARCHAR(1000) NULL,
+            http_code INT NULL,
+            ok TINYINT(1) NOT NULL DEFAULT 0,
+            payload TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+            response TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+            created_at VARCHAR(30) NOT NULL DEFAULT ''
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci")->execute();
+    }
 } catch (Exception $e) {
     file_put_contents('error_log', $e->getMessage());
 }

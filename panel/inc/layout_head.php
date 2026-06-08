@@ -160,6 +160,11 @@ $initials = mb_strtoupper(mb_substr($currentUser, 0, 1, 'UTF-8'), 'UTF-8');
             <span class="nav-icon"><?= icon('package') ?></span><span
               class="nav-label">حمل‌ونقل</span>
           </a>
+          <a href="automation.php" class="nav-item <?= $activeNav === 'automation' ? 'active' : '' ?>"
+            title="اتوماسیون، Webhook و اتصال n8n">
+            <span class="nav-icon"><?= icon('zap') ?></span><span
+              class="nav-label">اتوماسیون / n8n</span>
+          </a>
           <a href="search.php" class="nav-item <?= $activeNav === 'search' ? 'active' : '' ?>"
             title="جستجوی پیشرفته">
             <span class="nav-icon"><?= icon('search') ?></span><span

@@ -3769,6 +3769,28 @@ function order_status_label($status)
  * Update an order's status (Payment_report.order_status) by order id.
  * Returns true on success.
  */
+/**
+ * Safe wrapper around the open automation layer. Lazily loads automation.php
+ * and fires an event only if the layer is present. Never throws, so it can be
+ * sprinkled anywhere without risk to the core flow (no-op when disabled).
+ */
+function emit_event($event, array $data = [], $bot_id = null)
+{
+    try {
+        if (!function_exists('fire_event')) {
+            $auto = __DIR__ . '/automation.php';
+            if (is_file($auto)) {
+                require_once $auto;
+            }
+        }
+        if (function_exists('fire_event')) {
+            fire_event($event, $data, $bot_id);
+        }
+    } catch (Throwable $e) {
+        error_log("emit_event error: " . $e->getMessage());
+    }
+}
+
 function set_order_status($order_id, $status)
 {
     global $connect;
@@ -3776,7 +3798,17 @@ function set_order_status($order_id, $status)
         $stmt = $connect->prepare(
             "UPDATE Payment_report SET order_status = ?, at_updated = ? WHERE id_order = ?"
         );
-        return $stmt->execute([(string) $status, date('Y-m-d H:i:s'), (string) $order_id]);
+        $ok = $stmt->execute([(string) $status, date('Y-m-d H:i:s'), (string) $order_id]);
+        if ($ok) {
+            emit_event('order.status_changed', ['order_id' => (string) $order_id, 'status' => (string) $status]);
+            // Convenience aliases so n8n can subscribe to specific milestones.
+            $alias = ['paid' => 'order.paid', 'shipped' => 'order.shipped',
+                      'delivered' => 'order.delivered', 'canceled' => 'order.canceled'];
+            if (isset($alias[(string) $status])) {
+                emit_event($alias[(string) $status], ['order_id' => (string) $order_id, 'status' => (string) $status]);
+            }
+        }
+        return $ok;
     } catch (Exception $e) {
         error_log("set_order_status error: " . $e->getMessage());
         return false;
@@ -3800,20 +3832,31 @@ function set_order_tracking($order_id, $carrier, $tracking_code, $bump_shipped =
                      order_status = 'shipped', at_updated = ?
                  WHERE id_order = ?"
             );
-            return $stmt->execute([
+            $ok = $stmt->execute([
+                (string) $carrier, $carrierName, (string) $tracking_code,
+                date('Y-m-d H:i:s'), (string) $order_id,
+            ]);
+        } else {
+            $stmt = $connect->prepare(
+                "UPDATE Payment_report
+                 SET shipping_carrier = ?, carrier_name = ?, tracking_code = ?, at_updated = ?
+                 WHERE id_order = ?"
+            );
+            $ok = $stmt->execute([
                 (string) $carrier, $carrierName, (string) $tracking_code,
                 date('Y-m-d H:i:s'), (string) $order_id,
             ]);
         }
-        $stmt = $connect->prepare(
-            "UPDATE Payment_report
-             SET shipping_carrier = ?, carrier_name = ?, tracking_code = ?, at_updated = ?
-             WHERE id_order = ?"
-        );
-        return $stmt->execute([
-            (string) $carrier, $carrierName, (string) $tracking_code,
-            date('Y-m-d H:i:s'), (string) $order_id,
-        ]);
+        if ($ok) {
+            emit_event('order.shipped', [
+                'order_id'      => (string) $order_id,
+                'carrier'       => (string) $carrier,
+                'carrier_name'  => $carrierName,
+                'tracking_code' => (string) $tracking_code,
+                'tracking_url'  => carrier_tracking_url($carrier, $tracking_code),
+            ]);
+        }
+        return $ok;
     } catch (Exception $e) {
         error_log("set_order_tracking error: " . $e->getMessage());
         return false;
