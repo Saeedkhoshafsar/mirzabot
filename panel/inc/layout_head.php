@@ -130,6 +130,11 @@ $initials = mb_strtoupper(mb_substr($currentUser, 0, 1, 'UTF-8'), 'UTF-8');
               <?= icon('settings') ?>
             </span><span class="nav-label"><?= $textbotlang['panel']['layoutThemeToggleLabel'] ?></span>
           </a>
+          <a href="flow.php" class="nav-item <?= $activeNav === 'flow' ? 'active' : '' ?>"
+            title="ویرایشگر بصری دکمه‌ها">
+            <span class="nav-icon"><?= icon('package') ?></span><span
+              class="nav-label">ویرایشگر دکمه‌ها (درختی)</span>
+          </a>
 <?php
           // Store-only navigation. These pages are only meaningful when the
           // panel is NOT in plain VPN mode. The mode is decided by the
