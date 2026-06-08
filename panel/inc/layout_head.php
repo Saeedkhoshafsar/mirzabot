@@ -155,6 +155,11 @@ $initials = mb_strtoupper(mb_substr($currentUser, 0, 1, 'UTF-8'), 'UTF-8');
             <span class="nav-icon"><?= icon('invoice') ?></span><span
               class="nav-label">سفارش‌ها</span>
           </a>
+          <a href="shipping.php" class="nav-item <?= $activeNav === 'shipping' ? 'active' : '' ?>"
+            title="حمل‌ونقل، API شرکت‌ها و ارسال رایگان">
+            <span class="nav-icon"><?= icon('package') ?></span><span
+              class="nav-label">حمل‌ونقل</span>
+          </a>
           <a href="search.php" class="nav-item <?= $activeNav === 'search' ? 'active' : '' ?>"
             title="جستجوی پیشرفته">
             <span class="nav-icon"><?= icon('search') ?></span><span

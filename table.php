@@ -307,6 +307,10 @@ timeauto_not_verify,status_keyboard_config,cron_status
     addFieldToTable("setting", "store_name", "", "VARCHAR(500)");
     addFieldToTable("setting", "store_currency", "", "VARCHAR(50)");
     addFieldToTable("setting", "store_terminology", "{}", "TEXT");
+    // Shipping config: per-carrier enable flags + private API credentials +
+    // free-shipping rules. Stored as JSON. Empty {} = no carrier configured
+    // (VPN default behaviour is unaffected).
+    addFieldToTable("setting", "store_shipping", "{}", "TEXT");
 } catch (Exception $e) {
     file_put_contents('error_log', $e->getMessage());
 }

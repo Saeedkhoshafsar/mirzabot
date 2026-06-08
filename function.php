@@ -3513,28 +3513,212 @@ function shipping_carriers()
         'post' => [
             'name'  => 'پست جمهوری اسلامی ایران',
             'track' => 'https://tracking.post.ir/?id={code}',
+            // Private credentials each merchant obtains from the carrier. Each
+            // field: key => [label, type(text|password|number), required, hint].
+            'fields' => [
+                'api_key'      => ['label' => 'کلید API (در صورت داشتن قرارداد)', 'type' => 'password', 'required' => false, 'hint' => 'برای ثبت خودکار سفارش؛ خالی بماند یعنی فقط رهگیری دستی'],
+                'sender_name'  => ['label' => 'نام فرستنده', 'type' => 'text', 'required' => false, 'hint' => ''],
+                'sender_phone' => ['label' => 'تلفن فرستنده', 'type' => 'text', 'required' => false, 'hint' => ''],
+                'origin_city'  => ['label' => 'شهر مبدأ', 'type' => 'text', 'required' => false, 'hint' => ''],
+            ],
         ],
         'tipax' => [
             'name'  => 'تیپاکس',
             'track' => 'https://tipaxco.com/tracking?code={code}',
+            'fields' => [
+                'api_key'      => ['label' => 'API Key تیپاکس', 'type' => 'password', 'required' => true,  'hint' => 'از پنل کاربری تیپاکس'],
+                'username'     => ['label' => 'نام کاربری', 'type' => 'text', 'required' => false, 'hint' => ''],
+                'customer_id'  => ['label' => 'کد مشتری / Customer ID', 'type' => 'text', 'required' => false, 'hint' => ''],
+                'origin_city'  => ['label' => 'شهر مبدأ', 'type' => 'text', 'required' => false, 'hint' => ''],
+            ],
         ],
         'chapar' => [
             'name'  => 'چاپار',
             'track' => 'https://chaparexp.com/tracking?code={code}',
+            'fields' => [
+                'api_key'     => ['label' => 'API Key چاپار', 'type' => 'password', 'required' => false, 'hint' => ''],
+                'contract_no' => ['label' => 'شماره قرارداد', 'type' => 'text', 'required' => false, 'hint' => ''],
+            ],
         ],
         'mahex' => [
             'name'  => 'ماهکس',
             'track' => 'https://mahex.com/tracking?code={code}',
+            'fields' => [
+                'api_key'  => ['label' => 'API Key ماهکس', 'type' => 'password', 'required' => false, 'hint' => ''],
+                'username' => ['label' => 'نام کاربری', 'type' => 'text', 'required' => false, 'hint' => ''],
+            ],
         ],
         'snapp' => [
             'name'  => 'اسنپ‌باکس',
             'track' => '',
+            'fields' => [
+                'api_key'   => ['label' => 'API Key اسنپ‌باکس', 'type' => 'password', 'required' => false, 'hint' => ''],
+                'client_id' => ['label' => 'Client ID', 'type' => 'text', 'required' => false, 'hint' => ''],
+            ],
         ],
         'other' => [
             'name'  => 'سایر / حضوری',
             'track' => '',
+            'fields' => [],
         ],
     ];
+}
+
+/**
+ * Read the shipping config JSON from setting (main bot) or botsaz.setting
+ * (child bot). Always returns an array with normalised keys:
+ *   carriers => [ carrier_code => ['enabled'=>bool, 'cost'=>int, 'creds'=>[...]] ]
+ *   free_shipping => ['enabled'=>bool, 'min_order'=>int]   (min_order 0 = always free)
+ *   default_cost  => int    (fallback flat shipping cost when no per-carrier cost)
+ */
+function get_shipping_config($bot_id = null)
+{
+    global $pdo, $setting;
+    $defaults = [
+        'carriers'      => [],
+        'free_shipping' => ['enabled' => false, 'min_order' => 0],
+        'default_cost'  => 0,
+    ];
+    if ($bot_id === null) {
+        $bot_id = defined('BOT_ID') ? (int) BOT_ID : 0;
+    }
+    $raw = null;
+    try {
+        if ((int) $bot_id > 0 && isset($pdo)) {
+            $stmt = $pdo->prepare("SELECT setting FROM botsaz WHERE id = ? LIMIT 1");
+            $stmt->execute([(int) $bot_id]);
+            $brow = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($brow && !empty($brow['setting'])) {
+                $bset = json_decode($brow['setting'], true);
+                if (is_array($bset) && isset($bset['store_shipping'])) {
+                    $raw = is_array($bset['store_shipping'])
+                        ? $bset['store_shipping']
+                        : json_decode((string) $bset['store_shipping'], true);
+                }
+            }
+        } else {
+            if (is_array($setting) && isset($setting['store_shipping'])) {
+                $raw = is_array($setting['store_shipping'])
+                    ? $setting['store_shipping']
+                    : json_decode((string) $setting['store_shipping'], true);
+            } else {
+                $row = select("setting", "store_shipping", null, null, "FETCH_COLUMN");
+                if ($row) {
+                    $raw = json_decode((string) $row, true);
+                }
+            }
+        }
+    } catch (Exception $e) {
+        error_log("get_shipping_config error: " . $e->getMessage());
+    }
+    if (!is_array($raw)) {
+        return $defaults;
+    }
+    $cfg = array_merge($defaults, $raw);
+    if (!is_array($cfg['carriers'])) {
+        $cfg['carriers'] = [];
+    }
+    if (!is_array($cfg['free_shipping'])) {
+        $cfg['free_shipping'] = $defaults['free_shipping'];
+    }
+    $cfg['free_shipping']['enabled']   = !empty($cfg['free_shipping']['enabled']);
+    $cfg['free_shipping']['min_order'] = (int) ($cfg['free_shipping']['min_order'] ?? 0);
+    $cfg['default_cost']               = (int) ($cfg['default_cost'] ?? 0);
+    return $cfg;
+}
+
+/**
+ * Persist the shipping config (validated/normalised array). Scope: global
+ * (bot_id 0) -> setting.store_shipping ; child bot -> botsaz.setting JSON.
+ * Returns true on success.
+ */
+function set_shipping_config(array $cfg, $bot_id = null)
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return false;
+    }
+    if ($bot_id === null) {
+        $bot_id = defined('BOT_ID') ? (int) BOT_ID : 0;
+    }
+    $json = json_encode($cfg, JSON_UNESCAPED_UNICODE);
+    try {
+        if ((int) $bot_id > 0) {
+            $stmt = $pdo->prepare("SELECT setting FROM botsaz WHERE id = ? LIMIT 1");
+            $stmt->execute([(int) $bot_id]);
+            $brow = $stmt->fetch(PDO::FETCH_ASSOC);
+            $bset = ($brow && !empty($brow['setting'])) ? json_decode($brow['setting'], true) : [];
+            if (!is_array($bset)) {
+                $bset = [];
+            }
+            $bset['store_shipping'] = $cfg;
+            return $pdo->prepare("UPDATE botsaz SET setting = ? WHERE id = ?")
+                ->execute([json_encode($bset, JSON_UNESCAPED_UNICODE), (int) $bot_id]);
+        }
+        return $pdo->prepare("UPDATE setting SET store_shipping = ?")->execute([$json]);
+    } catch (Exception $e) {
+        error_log("set_shipping_config error: " . $e->getMessage());
+        return false;
+    }
+}
+
+/** True if a given carrier is enabled in the shipping config. */
+function carrier_enabled($carrier, $bot_id = null)
+{
+    $cfg = get_shipping_config($bot_id);
+    return !empty($cfg['carriers'][$carrier]['enabled']);
+}
+
+/** List of enabled carriers as [code => name] (for customer-facing pickers). */
+function enabled_carriers($bot_id = null)
+{
+    $cfg = get_shipping_config($bot_id);
+    $all = shipping_carriers();
+    $out = [];
+    foreach ($cfg['carriers'] as $code => $c) {
+        if (!empty($c['enabled']) && isset($all[$code])) {
+            $out[$code] = $all[$code]['name'];
+        }
+    }
+    return $out;
+}
+
+/** A carrier's private credential value (e.g. api_key), or '' if unset. */
+function carrier_credential($carrier, $field, $bot_id = null)
+{
+    $cfg = get_shipping_config($bot_id);
+    return (string) ($cfg['carriers'][$carrier]['creds'][$field] ?? '');
+}
+
+/**
+ * Compute the shipping cost for an order, honouring the free-shipping rule.
+ * - If free shipping is enabled and (min_order == 0 OR order_total >= min_order)
+ *   the cost is 0.
+ * - Otherwise the per-carrier cost (if set) else the default_cost.
+ * Returns an int cost in the store currency unit.
+ */
+function calc_shipping_cost($order_total, $carrier = null, $bot_id = null)
+{
+    $cfg = get_shipping_config($bot_id);
+    $order_total = (int) $order_total;
+    $free = $cfg['free_shipping'];
+    if (!empty($free['enabled'])) {
+        $min = (int) ($free['min_order'] ?? 0);
+        if ($min <= 0 || $order_total >= $min) {
+            return 0;
+        }
+    }
+    if ($carrier !== null && isset($cfg['carriers'][$carrier]['cost'])) {
+        return (int) $cfg['carriers'][$carrier]['cost'];
+    }
+    return (int) ($cfg['default_cost'] ?? 0);
+}
+
+/** True if free shipping currently applies to a given order total. */
+function is_free_shipping($order_total, $bot_id = null)
+{
+    return calc_shipping_cost($order_total, null, $bot_id) === 0
+        && !empty(get_shipping_config($bot_id)['free_shipping']['enabled']);
 }
 
 /**
