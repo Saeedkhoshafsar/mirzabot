@@ -643,8 +643,11 @@ if ($text == "/start" || $datain == "start" || $text == "start") {
     update("user", "Processing_value", $usernameconfig, "id", $from_id);
     sendmessage($from_id, $textbotlang['textbot']['selectLocation'], $list_marzban_panel_user, 'html');
     step('getdata', $from_id);
-} elseif (preg_match('/^shop_coupon_\d+$/', (string) ($user['step'] ?? '')) && shop_handle_coupon_step($user['step'], $text, $from_id, $user)) {
-    // User is typing a coupon code for a shop product.
+} elseif (
+    (preg_match('/^shop_coupon_\d+$/', (string) ($user['step'] ?? '')) || ($user['step'] ?? '') === 'shop_cart_coupon')
+    && shop_handle_coupon_step($user['step'], $text, $from_id, $user)
+) {
+    // User is typing a coupon code for a shop product or the whole cart.
     return;
 } elseif (preg_match('/^shop_address_(name|phone|province|city|addr|postal)$/', (string) ($user['step'] ?? '')) && shop_handle_address_step($user['step'], $text, $from_id, $user)) {
     // User is entering a postal address for a physical shop product.
@@ -661,11 +664,14 @@ if ($text == "/start" || $datain == "start" || $text == "start") {
     shop_handle_callback('shopsearch', $from_id, $user);
     return;
 } elseif (
-    $datain === 'shoplist' || $text === '/shop'
+    $datain === 'shoplist' || $text === '/shop' || $datain === 'shopcart' || $text === '/cart'
     || preg_match('/^shop(view|buy|coupon)_\d+$/', $datain)
+    || preg_match('/^cart(add|inc|dec|del)_/', $datain)
+    || in_array($datain, ['cartclear', 'cartcoupon', 'cartcheckout', 'cartnoop'], true)
 ) {
-    // Generic (non-VPN) shop purchase path — fully isolated from the VPN flow.
-    $shopData = ($text === '/shop') ? 'shoplist' : $datain;
+    // Generic (non-VPN) shop purchase path + multi-item cart — fully isolated
+    // from the VPN flow (only fires on shop*/cart* patterns).
+    $shopData = ($text === '/shop') ? 'shoplist' : (($text === '/cart') ? 'shopcart' : $datain);
     shop_handle_callback($shopData, $from_id, $user);
     return;
 } elseif (
