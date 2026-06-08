@@ -394,6 +394,23 @@ if ($user['joinchannel'] != "active") {
         }
     }
 }
+
+// Visual Button Flow — main-menu follow-up.
+// When the user taps a REAL main-menu button (inline callback like "buy", or the
+// reply-keyboard text), and the admin attached their own child node(s) to that
+// button in the flow editor, we send those children as an extra inline message
+// here — BEFORE the bot's native handling runs (which continues normally right
+// after). This makes "add a child to a real menu button" work for both inline
+// and reply keyboards, without overriding the button's built-in behaviour.
+// Skips flow navigation callbacks (flow*) and the /start command.
+if (
+    function_exists('flow_runtime_menu_followup')
+    && function_exists('flow_is_active') && flow_is_active()
+    && !(is_string($datain) && (strpos($datain, 'flow') === 0))
+    && $text !== '/start' && $datain !== 'start'
+) {
+    flow_runtime_menu_followup($from_id, is_string($datain) ? $datain : '', is_string($text) ? $text : '');
+}
 if ($text == "/start" || $datain == "start" || $text == "start") {
     sendmessage($from_id, $textbotlang['users']['text_start'], $keyboard, "html");
     update("user", "Processing_value", "0", "id", $from_id);
@@ -401,15 +418,13 @@ if ($text == "/start" || $datain == "start" || $text == "start") {
     update("user", "Processing_value_tow", "0", "id", $from_id);
     update("user", "Processing_value_four", "0", "id", $from_id);
     step('home', $from_id);
-    // Visual Button Flow (Phase 7): if the admin has built a node tree, drop the
-    // user at its root menu right after the normal welcome. No-op when inactive.
-    if (function_exists('flow_runtime_handle') && function_exists('flow_is_active') && flow_is_active()) {
-        flow_runtime_handle([
-            'from_id' => $from_id,
-            'datain'  => 'flowhome',
-            'text'    => '',
-            'user'    => $user,
-        ]);
+    // Visual Button Flow: the real main menu is already shown by $keyboard above.
+    // We do NOT re-render the flow root here (that caused a duplicate menu + the
+    // root's helper text leaking into /start). Custom flow children are reached
+    // by tapping their parent menu button — handled in flow_runtime_handle().
+    // Just reset any stale flow state so a fresh session starts clean.
+    if (function_exists('flow_state_clear') && function_exists('flow_is_active') && flow_is_active()) {
+        flow_state_clear($from_id);
     }
     return;
 } elseif ($text == "version") {

@@ -140,6 +140,17 @@ function flow_runtime_keyboard(array $tree, array $node)
     $rows = [];
     $children = flow_children($tree, $node['id']);
     foreach ($children as $child) {
+        // Skip the bot's real-menu / demo mirror nodes: those buttons are already
+        // rendered by the bot's native main menu (keyboard.php). Re-rendering them
+        // as inline flow buttons caused a duplicate menu under /start. Disabled
+        // nodes are skipped too. Only the admin's own (user) child nodes render.
+        $kind = (string) ($child['node_kind'] ?? 'user');
+        if ($kind === 'system_menu' || $kind === 'system_demo' || $kind === 'root') {
+            continue;
+        }
+        if (!empty($child['disabled'])) {
+            continue;
+        }
         $label = (string) ($child['label'] ?? '');
         if ($label === '') {
             $label = '⬜';
@@ -590,4 +601,100 @@ function flow_runtime_handle(array $ctx)
 
     // Not a flow interaction — let legacy dispatch handle it.
     return false;
+}
+
+/* -------------------------------------------------------------------------
+ * Main-menu follow-up: show an admin's custom child nodes that hang off a
+ * real menu button.
+ * ---------------------------------------------------------------------- */
+
+/**
+ * Resolve a real-menu node by the callback the bot uses for it (e.g. "buy",
+ * "supportbtns") OR by the visible button label/menu_key. Returns the node or
+ * null. Only system_menu nodes are considered.
+ */
+function flow_find_menu_node(array $tree, $callback = '', $label = '')
+{
+    $callback = (string) $callback;
+    $label    = trim((string) $label);
+    foreach ($tree['nodes'] as $n) {
+        if (($n['node_kind'] ?? '') !== 'system_menu') {
+            continue;
+        }
+        $cb = (string) ($n['config']['callback'] ?? '');
+        if ($callback !== '' && $cb !== '' && $cb === $callback) {
+            return $n;
+        }
+        if ($label !== '') {
+            if (trim((string) ($n['label'] ?? '')) === $label) {
+                return $n;
+            }
+            if (trim((string) ($n['menu_key'] ?? '')) === $label) {
+                return $n;
+            }
+        }
+    }
+    return null;
+}
+
+/**
+ * When a user taps a REAL main-menu button (e.g. «سرویس‌های من»), the bot runs
+ * its built-in logic as usual. If the admin has attached their own (user) child
+ * nodes to that menu button in the flow, we ALSO send a small follow-up message
+ * with those children as inline buttons — without touching/blocking the bot's
+ * native handling. This is what makes "add a child to a real menu button" work
+ * for BOTH inline and reply keyboards.
+ *
+ * Returns true if a follow-up was sent (caller may ignore the result; it never
+ * blocks legacy dispatch). Safe no-op when no flow / no matching node / no
+ * user children.
+ *
+ * @param mixed $callback  the bot callback_data (inline taps), '' for reply text
+ * @param mixed $label     the visible button text (reply-keyboard taps)
+ */
+function flow_runtime_menu_followup($from_id, $callback = '', $label = '')
+{
+    if (!$from_id || !flow_is_active()) {
+        return false;
+    }
+    $tree = get_button_flow();
+    $menu = flow_find_menu_node($tree, $callback, $label);
+    if (!$menu) {
+        return false;
+    }
+    // Don't surface children of a menu button the admin disabled.
+    if (!empty($menu['disabled'])) {
+        return false;
+    }
+    // Gather only the admin's own, enabled child nodes.
+    $children = flow_children($tree, $menu['id']);
+    $rows = [];
+    foreach ($children as $child) {
+        $kind = (string) ($child['node_kind'] ?? 'user');
+        if ($kind !== 'user' || !empty($child['disabled'])) {
+            continue;
+        }
+        $clabel = (string) ($child['label'] ?? '');
+        if ($clabel === '') {
+            $clabel = '⬜';
+        }
+        $cfg = $child['config'] ?? [];
+        if (!empty($cfg['url'])) {
+            $rows[] = [['text' => $clabel, 'url' => $cfg['url']]];
+        } else {
+            $rows[] = [['text' => $clabel, 'callback_data' => 'flowgo_' . $child['id']]];
+        }
+    }
+    if (empty($rows)) {
+        return false;
+    }
+    // A short header so the extra buttons read as "more options", using the
+    // menu's own message if the admin set one, else a generic line.
+    $header = trim((string) ($menu['config']['message'] ?? ''));
+    if ($header === '') {
+        $header = '➕ گزینه‌های بیشتر:';
+    }
+    $kb = ['inline_keyboard' => $rows];
+    sendmessage($from_id, $header, json_encode($kb, JSON_UNESCAPED_UNICODE), 'HTML');
+    return true;
 }
