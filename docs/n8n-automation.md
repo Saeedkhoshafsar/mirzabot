@@ -142,6 +142,32 @@ Content-Type: application/json
 
 ---
 
+## ۴) دکمه‌های سفارشی ربات
+
+در پنل «اتوماسیون / n8n» می‌توانید دکمه‌هایی برای **منوی اصلی ربات** بسازید. هر دکمه:
+
+- **رویداد n8n** می‌زند (پیش‌فرض `custom.trigger`، یا هر نام دلخواه) همراه با context کاربر
+  (`button_id`, `label`, `user_id`, `username`, `balance`).
+- می‌تواند یک **پیام آماده** به کاربر بفرستد.
+- یا فقط یک **لینک** باز کند (اگر فقط فیلد لینک پر شود، دکمه به‌صورت دکمهٔ URL ظاهر می‌شود).
+
+نمونهٔ envelope هنگام کلیک:
+
+```json
+{
+  "event": "custom.trigger",
+  "data": { "button_id": "b1a2c3", "label": "درخواست مشاوره",
+            "user_id": "123456", "username": "ali", "balance": 50000 },
+  "bot_id": 0, "fired_at": "...", "source": "mirzabot"
+}
+```
+
+> نمایش این دکمه‌ها در منو نیازمند فعال بودن حالت دکمه‌های شیشه‌ای منوی اصلی است
+> (تنظیم `inlinebtnmain = oninline`). دکمه‌های لینک‌محور همیشه کار می‌کنند.
+
+با این دکمه‌ها متخصص n8n می‌تواند هر گردش‌کاری دلخواه (مشاوره، درخواست سفارش خاص،
+فرم‌ها، نظرسنجی، اتصال به CRM و...) را بدون تغییر کد هسته بسازد.
+
 ## مرجع توابع (`automation.php`)
 
 | تابع                                              | کار                                            |
@@ -155,6 +181,7 @@ Content-Type: application/json
 | `automation_random_token($bytes)`                 | تولید توکن/Secret تصادفی                       |
 | `automation_recent_logs($limit, $bot_id)`         | آخرین تحویل‌ها برای نمایش در پنل                |
 | `automation_events()` / `automation_actions()`    | فهرست رویدادها / اکشن‌های مجاز                  |
+| `automation_buttons($bot_id)` / `automation_button($id, $bot_id)` | دکمه‌های سفارشی / یافتن یک دکمه |
 
 داده‌ها: `setting.automation_config` (JSON، سراسری) یا per-bot در `botsaz.setting`، و
 جدول `automation_log` برای تاریخچهٔ تحویل.

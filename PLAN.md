@@ -323,7 +323,7 @@ n8n فقط یک **افزونهٔ اختیاری** خواهد بود: بعداً 
   - [ ] واریانت/تعداد/خلاصهٔ سفارش پیش از پرداخت و هزینهٔ ارسال در فاکتور → در استپ ۸ج (همراه آدرس و موجودی) تکمیل می‌شود
   - یادداشت: دکمهٔ فروشگاه به منوی اصلی اضافه نشد چون کیبورد اصلی قابل‌تنظیم/داینامیک است (ریسک رگرسیون VPN)؛ به‌جای آن دستور `/shop` + کال‌بک‌ها. اتصال به منو در ویزارد/قالب استپ ۹ انجام می‌شود.
 
-- [ ] استپ ۸ — تخفیف‌ها و کدهای تخفیف حرفه‌ای (Discounts / Coupons)
+- [x] استپ ۸ — تخفیف‌ها و کدهای تخفیف حرفه‌ای (Discounts / Coupons)
   - زیرساخت موجود کشف‌شده: `DiscountSell` (codeDiscount/limitDiscount/usedDiscount/type/time/agent)، `Discount` (کد شارژ کیف‌پول)، `Giftcodeconsumed`. روی این‌ها می‌سازیم نه از صفر.
   - [ ] گسترش `DiscountSell` (non-destructive): `discount_kind` (percent|fixed)، `max_amount` (سقف تخفیف درصدی)، `min_order` (حداقل مبلغ سفارش)، `start_at`/`expire_at` (بازهٔ اعتبار)، `per_user_limit` (سقف به‌ازای هر کاربر)، `product_scope` (JSON: all|category|product ids)، `bot_id`، `enabled`
   - [ ] **ساخت دسته‌ای کد تخفیف**: تولید N کد یکتا با پیشوند دلخواه (مثلا `EID-XXXX`) در یک عملیات
@@ -335,7 +335,7 @@ n8n فقط یک **افزونهٔ اختیاری** خواهد بود: بعداً 
   - [ ] گزارش استفاده از تخفیف در پنل (چند بار، چه مبلغی، چه کسی)
   - [ ] رگرسیون: سیستم کد شارژ کیف‌پول `Discount` فعلی دست‌نخورده
 
-- [ ] استپ ۸ب — سفارش، وضعیت و کد رهگیری (Orders & Tracking)
+- [x] استپ ۸ب — سفارش، وضعیت و کد رهگیری (Orders & Tracking)
   - [ ] گسترش `Payment_report` (non-destructive): `order_status` (pending|paid|preparing|shipped|delivered|canceled|refunded)، `tracking_code` (کد رهگیری مرسوله)، `shipping_carrier` (post|tipax|courier|pickup|custom)، `carrier_name` (نام دلخواه شرکت)، `shipping_method`، `shipping_cost`، `address_id`، `product_id`، `variant` (JSON رنگ/سایز)، `quantity`، `admin_note`
   - [ ] رجیستری شرکت‌های ارسال + الگوی لینک رهگیری: `shipping_carriers()` در function.php (پست ایران→`tracking.post.ir/?id={code}`، تیپاکس، پیک، حضوری، سفارشی) — لینک رهگیری به کاربر داده شود
   - [ ] صفحهٔ پنل `panel/orders.php` (self-contained، per-bot): لیست با فیلتر وضعیت/تاریخ، جزئیات کامل سفارش (محصول، واریانت، تعداد، آدرس گیرنده، روش ارسال)، تغییر وضعیت، ثبت کد رهگیری + انتخاب شرکت ارسال، یادداشت ادمین
@@ -344,7 +344,7 @@ n8n فقط یک **افزونهٔ اختیاری** خواهد بود: بعداً 
   - [ ] توابع `set_order_status()`, `set_order_tracking()`, `notify_order_update()`, `order_status_label()` در `function.php`
   - [ ] رگرسیون: سفارش‌های VPN فعلی (که وضعیت ندارند) دست‌نخورده
 
-- [ ] استپ ۸ج — آدرس مشتری و انبار/موجودی (Address & Inventory)
+- [x] استپ ۸ج — آدرس مشتری و انبار/موجودی (Address & Inventory)
   - [ ] جدول `customer_address` (id, user_id, bot_id, recipient_name, recipient_phone, province, city, postal_code, address_line, plaque, unit, is_default, created_at) — نام‌ونام‌خانوادگی گیرنده، موبایل گیرنده، استان، شهر، کدپستی، آدرس، پلاک، واحد
   - [ ] جریان گرفتن آدرس در ربات (step به step): اگر موبایل ندارد → request_contact (سیستم موجود)؛ سپس گیرنده→استان→شهر→کدپستی(اعتبارسنجی ۱۰ رقم)→آدرس→پلاک/واحد؛ ذخیره و قابل انتخاب دفعهٔ بعد
   - [ ] مدیریت آدرس‌ها در ربات: لیست آدرس‌ها، افزودن، حذف، تعیین پیش‌فرض
@@ -355,7 +355,7 @@ n8n فقط یک **افزونهٔ اختیاری** خواهد بود: بعداً 
   - [ ] توابع `decrement_stock()`, `restore_stock()`, `check_availability()`, `variant_stock()` در `function.php`
   - [ ] اعتبارسنجی کدپستی/شمارهٔ موبایل ایران (تبدیل ارقام فارسی→انگلیسی)
 
-- [ ] استپ ۸د — جستجو و فیلتر پیشرفته (Search & Filter)
+- [x] استپ ۸د — جستجو و فیلتر پیشرفته (Search & Filter)
   - [ ] **پنل — محصولات**: جستجوی متنی (نام/SKU/برند)، فیلتر نوع محصول، دسته، بازهٔ قیمت، وضعیت موجودی + مرتب‌سازی
   - [ ] **پنل — سفارش‌ها**: جستجو بر اساس کد رهگیری/شناسهٔ کاربر/شماره سفارش، فیلتر وضعیت و بازهٔ تاریخ
   - [ ] **پنل — کاربران**: جستجوی موجود را بهبود (نام/یوزرنیم/آیدی) — اگر قبلاً نیست اضافه شود
@@ -377,13 +377,13 @@ n8n فقط یک **افزونهٔ اختیاری** خواهد بود: بعداً 
   - [x] نقشهٔ توابع کلیدی + یادداشت‌های ایمنی رگرسیون در سند
   - [x] قالب نمونهٔ «آنلاین‌شاپ» (`shop` preset) به‌عنوان مثال آماده در ویزارد
 
-- [ ] استپ ۱۱ — دکمه‌های سفارشی و اکشن‌های n8n (Custom Button / Action Builder)
-  - [ ] جدول `custom_actions` (bot_id, label_key, action_type, webhook_url, parent_id, enabled, position, session_timeout, secret)
-  - [ ] سه action type: `internal` / `n8n_notify` / `n8n_chat`
-  - [ ] منطق session در ربات برای `n8n_chat` (ورود/خروج، POST هر پیام به webhook با payload استاندارد)
-  - [ ] امضای `X-Bot-Signature` روی درخواست‌های خروجی به n8n
-  - [ ] صفحهٔ پنل: ساخت/ویرایش دکمه، غیرفعال/جایگزینی دکمه‌های رفرنس، منوی چندلایه (parent_id)
-  - [ ] رگرسیون: دکمه‌های رفرنس پیش‌فرض فعال بمانند اگر چیزی override نشده باشد
+- [x] استپ ۱۱ — لایهٔ اتوماسیون باز + دکمه‌های سفارشی + اکشن‌های n8n
+  - [x] پیکربندی JSON در `setting.automation_config` (سبک‌تر از جدول مجزا) + جدول `automation_log`
+  - [x] خروجی: `fire_event()`/`emit_event()` با ۱۳ رویداد، امضای `X-Signature` (HMAC-SHA256)، چند مقصد با فیلتر رویداد
+  - [x] ورودی: `api/automation.php` با Bearer token + ۸ اکشن (`send_message`/`broadcast`/`set_order_status`/`set_order_tracking`/`adjust_balance`/`get_order`/`get_user`/`fire_event`)
+  - [x] دکمه‌های سفارشی منوی اصلی ربات: شلیک رویداد `custom.trigger`/دلخواه + پیام آماده + دکمهٔ لینک (`cbtn_<id>` در `index.php`، تزریق در `keyboard.php`)
+  - [x] صفحهٔ پنل `panel/automation.php` (مقصدها، Secret، توکن، دکمه‌ها، لاگ تحویل) + مستند `docs/n8n-automation.md`
+  - [x] رگرسیون: همه‌چیز opt-in و پیش‌فرض خاموش؛ no-op وقتی غیرفعال است
 
 ---
 

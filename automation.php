@@ -298,6 +298,44 @@ function automation_dispatch($url, $body, $secret, $event, $bot_id, $doLog = tru
     }
 }
 
+/**
+ * Custom buttons (Step 11) — admin-defined buttons shown on the bot's main
+ * menu. Each button can: fire an n8n event (custom.trigger), send a canned
+ * message to the user, and/or open a URL. Stored under automation_config.
+ * Returns a normalised list: [['id','label','event','message','url','active'], ...]
+ */
+function automation_buttons($bot_id = null)
+{
+    $cfg = get_automation_config($bot_id);
+    $btns = is_array($cfg['buttons'] ?? null) ? $cfg['buttons'] : [];
+    $out = [];
+    foreach ($btns as $b) {
+        if (!is_array($b) || empty($b['label'])) {
+            continue;
+        }
+        $out[] = [
+            'id'      => (string) ($b['id'] ?? ''),
+            'label'   => (string) $b['label'],
+            'event'   => (string) ($b['event'] ?? ''),
+            'message' => (string) ($b['message'] ?? ''),
+            'url'     => (string) ($b['url'] ?? ''),
+            'active'  => !isset($b['active']) ? true : !empty($b['active']),
+        ];
+    }
+    return $out;
+}
+
+/** Find a single active custom button by id. */
+function automation_button($id, $bot_id = null)
+{
+    foreach (automation_buttons($bot_id) as $b) {
+        if ($b['active'] && $b['id'] === (string) $id) {
+            return $b;
+        }
+    }
+    return null;
+}
+
 /** Recent delivery log rows for the panel. */
 function automation_recent_logs($limit = 50, $bot_id = null)
 {

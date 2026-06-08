@@ -100,6 +100,25 @@ if ($setting['inlinebtnmain'] == "oninline" && !empty($keyboardRows)) {
     $keyboardcustom = $trace_keyboard;
     $keyboardcustom = json_decode(strtr(strval(json_encode($keyboardcustom)), $replacements), true);
     $keyboardcustom[] = $temp_addtional_key;
+    // --- Custom automation buttons (Step 11) ---
+    // Admin-defined buttons that fire n8n events / send a message / open a URL.
+    // Appended only when defined, so the existing layout is untouched otherwise.
+    if (function_exists('automation_buttons') || is_file(__DIR__ . '/automation.php')) {
+        if (!function_exists('automation_buttons')) {
+            require_once __DIR__ . '/automation.php';
+        }
+        foreach (automation_buttons() as $cb) {
+            if (!$cb['active'] || $cb['label'] === '') {
+                continue;
+            }
+            if ($cb['url'] !== '' && $cb['event'] === '' && $cb['message'] === '') {
+                // Pure link button.
+                $keyboardcustom[] = [['text' => $cb['label'], 'url' => $cb['url']]];
+            } else {
+                $keyboardcustom[] = [['text' => $cb['label'], 'callback_data' => 'cbtn_' . $cb['id']]];
+            }
+        }
+    }
     $keyboard['inline_keyboard'] = $keyboardcustom;
     $keyboard = json_encode($keyboard);
 } else {

@@ -636,6 +636,31 @@ if ($text == "/start" || $datain == "start" || $text == "start") {
     $shopData = ($text === '/shop') ? 'shoplist' : $datain;
     shop_handle_callback($shopData, $from_id, $user);
     return;
+} elseif (preg_match('/^cbtn_(.+)$/', (string) $datain, $cbm)) {
+    // Custom automation button (Step 11): fire an n8n event with full user
+    // context and/or reply with a canned message. Safe no-op if undefined.
+    if (!function_exists('automation_button') && is_file(__DIR__ . '/automation.php')) {
+        require_once __DIR__ . '/automation.php';
+    }
+    $btn = function_exists('automation_button') ? automation_button($cbm[1]) : null;
+    if ($btn) {
+        if (!empty($btn['event']) && function_exists('emit_event')) {
+            emit_event($btn['event'] !== '' ? $btn['event'] : 'custom.trigger', [
+                'button_id' => $btn['id'],
+                'label'     => $btn['label'],
+                'user_id'   => (string) $from_id,
+                'username'  => (string) ($user['username'] ?? ''),
+                'balance'   => (int) ($user['Balance'] ?? 0),
+            ]);
+        }
+        if (!empty($btn['message'])) {
+            sendmessage($from_id, $btn['message'], $keyboard, 'HTML');
+        } elseif (!empty($btn['event'])) {
+            // Acknowledge silently so the user gets feedback.
+            sendmessage($from_id, '✅', $keyboard, 'HTML');
+        }
+    }
+    return;
 } elseif (preg_match('/locationnotuser_(.*)/', $datain, $dataget)) {
     $marzban_list_get = select("marzban_panel", "*", "code_panel", $dataget[1]);
     update("user", "Processing_value_four", $marzban_list_get['code_panel'], "id", $from_id);
