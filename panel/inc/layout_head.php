@@ -124,12 +124,8 @@ $initials = mb_strtoupper(mb_substr($currentUser, 0, 1, 'UTF-8'), 'UTF-8');
             <span class="nav-icon"><?= icon('card') ?></span><span
               class="nav-label"><?= $textbotlang['panel']['layoutSearchBoxPlaceholder'] ?></span>
           </a>
-          <a href="keyboard.php" class="nav-item <?= $activeNav === 'keyboard' ? 'active' : '' ?>"
-            title="<?= $textbotlang['panel']['layoutPageTitleKeyboard'] ?>">
-            <span class="nav-icon">
-              <?= icon('settings') ?>
-            </span><span class="nav-label"><?= $textbotlang['panel']['layoutThemeToggleLabel'] ?></span>
-          </a>
+          <?php /* صفحهٔ «چیدمان کیبورد» (keyboard.php) حذف شد؛ چیدمان دکمه‌ها اکنون
+                   داخل تنظیمات هر نود در «ویرایشگر دکمه‌ها (درختی)» انجام می‌شود. */ ?>
           <a href="flow.php" class="nav-item <?= $activeNav === 'flow' ? 'active' : '' ?>"
             title="ویرایشگر بصری دکمه‌ها">
             <span class="nav-icon"><?= icon('package') ?></span><span

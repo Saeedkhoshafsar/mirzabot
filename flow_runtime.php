@@ -177,15 +177,59 @@ function flow_state_clear($user_id, $bot_id = null)
  * flowgo_<childId>), then optional auto «بازگشت» / «منوی اصلی» rows.
  * Buttons with a config.url are rendered as link buttons instead.
  */
+/**
+ * Arrange a FLAT list of buttons into keyboard rows according to a node's
+ * 'child_layout' setting:
+ *   ''        → one button per row (legacy / auto)
+ *   'N'       → N buttons per row
+ *   'a,b,c'   → row1 a buttons, row2 b, … (leftover buttons wrap one-per-row)
+ * Always returns an array of rows; never loses a button.
+ */
+function flow_layout_rows(array $buttons, $layout)
+{
+    $layout = is_string($layout) ? trim($layout) : '';
+    $n = count($buttons);
+    if ($n === 0) {
+        return [];
+    }
+    if ($layout === '' || $layout === 'auto') {
+        return array_map(function ($b) { return [$b]; }, $buttons);
+    }
+    // Fixed N-per-row.
+    if (preg_match('/^\d+$/', $layout)) {
+        $per = max(1, min(8, (int) $layout));
+        return array_chunk($buttons, $per);
+    }
+    // Custom CSV pattern.
+    $pattern = array_values(array_filter(array_map(function ($p) {
+        $p = (int) trim($p);
+        return ($p >= 1 && $p <= 8) ? $p : 0;
+    }, explode(',', $layout))));
+    $rows = [];
+    $i = 0;
+    foreach ($pattern as $count) {
+        if ($i >= $n) {
+            break;
+        }
+        $rows[] = array_slice($buttons, $i, $count);
+        $i += $count;
+    }
+    // Any remaining buttons: one per row so nothing is dropped.
+    while ($i < $n) {
+        $rows[] = [$buttons[$i]];
+        $i++;
+    }
+    return $rows;
+}
+
 function flow_runtime_keyboard(array $tree, array $node)
 {
-    $rows = [];
+    $btns = [];
     $children = flow_children($tree, $node['id']);
     foreach ($children as $child) {
         // Skip the bot's real-menu / demo mirror nodes: those buttons are already
-        // rendered by the bot's native main menu (keyboard.php). Re-rendering them
-        // as inline flow buttons caused a duplicate menu under /start. Disabled
-        // nodes are skipped too. Only the admin's own (user) child nodes render.
+        // rendered by the bot's native main menu. Disabled nodes are skipped too.
+        // Only the admin's own (user) child nodes render.
         $kind = (string) ($child['node_kind'] ?? 'user');
         if ($kind === 'system_menu' || $kind === 'system_demo' || $kind === 'root') {
             continue;
@@ -199,14 +243,16 @@ function flow_runtime_keyboard(array $tree, array $node)
         }
         $cfg = $child['config'] ?? [];
         if (!empty($cfg['url'])) {
-            $rows[] = [['text' => $label, 'url' => $cfg['url']]];
+            $btns[] = ['text' => $label, 'url' => $cfg['url']];
         } else {
-            $rows[] = [['text' => $label, 'callback_data' => 'flowgo_' . $child['id']]];
+            $btns[] = ['text' => $label, 'callback_data' => 'flowgo_' . $child['id']];
         }
     }
 
-    // Auto navigation buttons (only on non-root nodes, honouring per-node flags).
     $cfg = $node['config'] ?? [];
+    $rows = flow_layout_rows($btns, (string) ($cfg['child_layout'] ?? ''));
+
+    // Auto navigation buttons (only on non-root nodes, honouring per-node flags).
     $isRoot = ($node['id'] === flow_root_id($tree));
     $navRow = [];
     if (!$isRoot && !empty($node['parent']) && !empty($cfg['auto_back'])) {
@@ -239,7 +285,7 @@ function flow_node_display_mode(array $node)
  */
 function flow_runtime_reply_keyboard(array $tree, array $node)
 {
-    $rows = [];
+    $btns = [];
     foreach (flow_children($tree, $node['id']) as $child) {
         $kind = (string) ($child['node_kind'] ?? 'user');
         if ($kind === 'system_menu' || $kind === 'system_demo' || $kind === 'root') {
@@ -255,10 +301,11 @@ function flow_runtime_reply_keyboard(array $tree, array $node)
         if ($label === '') {
             $label = '⬜';
         }
-        $rows[] = [['text' => $label]];
+        $btns[] = ['text' => $label];
     }
-    // Navigation as plain-text rows too (matched back in the handler).
     $cfg = $node['config'] ?? [];
+    $rows = flow_layout_rows($btns, (string) ($cfg['child_layout'] ?? ''));
+    // Navigation as plain-text rows too (matched back in the handler).
     $isRoot = ($node['id'] === flow_root_id($tree));
     $navRow = [];
     if (!$isRoot && !empty($node['parent']) && !empty($cfg['auto_back'])) {
@@ -307,6 +354,36 @@ function flow_match_child_by_text(array $tree, array $parentNode, $text)
         }
     }
     return null;
+}
+
+/**
+ * Send the user back to the BOT'S REAL main menu (not the internal flow root).
+ * Clears flow state and re-sends the native start keyboard, exactly like the
+ * bot does on /start. This avoids leaking the flow root's helper text
+ * («این نقطه شروع درخت است…») to end users when they tap بازگشت/منوی اصلی.
+ *
+ * Uses the globals index.php already prepared ($keyboard, $textbotlang). Falls
+ * back gracefully if those aren't set (e.g. in tests).
+ */
+function flow_runtime_go_home($from_id)
+{
+    global $keyboard, $textbotlang;
+    flow_state_clear($from_id);
+    if (function_exists('step')) {
+        step('home', $from_id);
+    }
+    $msg = '';
+    if (isset($textbotlang['users']['text_start'])) {
+        $msg = (string) $textbotlang['users']['text_start'];
+    }
+    if ($msg === '') {
+        $msg = '🏠';
+    }
+    $kb = $keyboard ?? json_encode(['inline_keyboard' => []]);
+    if (function_exists('sendmessage')) {
+        sendmessage($from_id, $msg, $kb, 'html');
+    }
+    return true;
 }
 
 /** The text shown for a node (message, or a fallback to the label). */
@@ -724,17 +801,21 @@ function flow_runtime_handle(array $ctx)
 
     // ---- Navigation callbacks -------------------------------------------
     if ($datain === 'flowhome') {
-        flow_state_clear($from_id);
-        $fresh = flow_state_get($from_id);
-        flow_runtime_enter($tree, flow_root_id($tree), $fresh, $ctx);
+        flow_runtime_go_home($from_id);
         return true;
     }
 
     if ($datain === 'flowback') {
         $node = flow_node($tree, $state['current_node'] ?? '');
         $parent = (is_array($node) && !empty($node['parent'])) ? (string) $node['parent'] : '';
-        $target = ($parent !== '' && flow_node($tree, $parent)) ? $parent : flow_root_id($tree);
-        flow_runtime_enter($tree, $target, $state, $ctx);
+        // Going "back" past the top of the user's own subtree lands on the
+        // bot's real main menu — NOT the internal flow root (whose helper text
+        // «این نقطه شروع درخت است…» must never reach the user).
+        if ($parent === '' || $parent === flow_root_id($tree) || !flow_node($tree, $parent)) {
+            flow_runtime_go_home($from_id);
+            return true;
+        }
+        flow_runtime_enter($tree, $parent, $state, $ctx);
         return true;
     }
 
@@ -755,15 +836,16 @@ function flow_runtime_handle(array $ctx)
             $hit = flow_match_child_by_text($tree, $cur, $text);
             if (is_array($hit) && !empty($hit['id'])) {
                 if ($hit['id'] === '__flowhome__') {
-                    flow_state_clear($from_id);
-                    $fresh = flow_state_get($from_id);
-                    flow_runtime_enter($tree, flow_root_id($tree), $fresh, $ctx);
+                    flow_runtime_go_home($from_id);
                     return true;
                 }
                 if ($hit['id'] === '__flowback__') {
                     $parent = !empty($cur['parent']) ? (string) $cur['parent'] : '';
-                    $target = ($parent !== '' && flow_node($tree, $parent)) ? $parent : flow_root_id($tree);
-                    flow_runtime_enter($tree, $target, $state, $ctx);
+                    if ($parent === '' || $parent === flow_root_id($tree) || !flow_node($tree, $parent)) {
+                        flow_runtime_go_home($from_id);
+                        return true;
+                    }
+                    flow_runtime_enter($tree, $parent, $state, $ctx);
                     return true;
                 }
                 flow_runtime_enter($tree, (string) $hit['id'], $state, $ctx);
