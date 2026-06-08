@@ -2379,6 +2379,357 @@ function store_term($term, $default = null)
     return $default !== null ? $default : $term;
 }
 
+/**
+ * Current store mode: 'vpn' (default, untouched VPN behaviour) or 'shop'.
+ * Read from setting.store_mode. Used to decide whether to show generic shop UI.
+ */
+function store_mode()
+{
+    global $setting;
+    if (is_array($setting) && !empty($setting['store_mode'])) {
+        return $setting['store_mode'];
+    }
+    $row = select("setting", "store_mode", null, null, "FETCH_COLUMN");
+    return $row ?: 'vpn';
+}
+
+/**
+ * Store currency label (e.g. "تومان"). Read from setting.store_currency.
+ */
+function store_currency()
+{
+    global $setting;
+    if (is_array($setting) && !empty($setting['store_currency'])) {
+        return $setting['store_currency'];
+    }
+    $row = select("setting", "store_currency", null, null, "FETCH_COLUMN");
+    return $row ?: 'تومان';
+}
+
+/**
+ * Fetch a single non-VPN shop product by id (scoped to current bot when set).
+ * Returns the product row or null.
+ */
+function shop_product($id, $bot_id = null)
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return null;
+    }
+    if ($bot_id === null) {
+        $bot_id = defined('BOT_ID') ? (int) BOT_ID : 0;
+    }
+    try {
+        $stmt = $pdo->prepare(
+            "SELECT * FROM product
+             WHERE id = ? AND product_type <> 'vpn' AND (bot_id = ? OR bot_id = 0)
+             LIMIT 1"
+        );
+        $stmt->execute([(int) $id, (int) $bot_id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row ?: null;
+    } catch (Exception $e) {
+        error_log("shop_product error: " . $e->getMessage());
+        return null;
+    }
+}
+
+/**
+ * List non-VPN shop products for the current bot (for the in-bot store list).
+ */
+function shop_product_list($bot_id = null, $limit = 100)
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return [];
+    }
+    if ($bot_id === null) {
+        $bot_id = defined('BOT_ID') ? (int) BOT_ID : 0;
+    }
+    try {
+        $stmt = $pdo->prepare(
+            "SELECT * FROM product
+             WHERE product_type <> 'vpn' AND (bot_id = ? OR bot_id = 0)
+             ORDER BY id DESC LIMIT " . (int) $limit
+        );
+        $stmt->execute([(int) $bot_id]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Exception $e) {
+        error_log("shop_product_list error: " . $e->getMessage());
+        return [];
+    }
+}
+
+/**
+ * Whether a shop product can currently be purchased (basic availability).
+ * For serial_code: needs at least one available code. Others: always true
+ * here (full inventory comes in step 8c).
+ */
+function shop_product_available($product)
+{
+    if (!is_array($product)) {
+        return false;
+    }
+    if (($product['product_type'] ?? '') === 'serial_code') {
+        $c = product_codes_count((int) $product['id']);
+        return $c['available'] > 0;
+    }
+    return true;
+}
+
+/**
+ * Render the shop product list (non-VPN products) as an inline keyboard of
+ * product buttons that open shopview_{id}.
+ */
+function shop_render_list($from_id)
+{
+    $cur      = store_currency();
+    $products = shop_product_list();
+    if (empty($products)) {
+        sendmessage($from_id, "در حال حاضر محصولی برای فروش موجود نیست.", null, 'html');
+        return;
+    }
+    $kb = ['inline_keyboard' => []];
+    foreach ($products as $p) {
+        $price = (int) preg_replace('/[^\d]/', '', (string) ($p['price_product'] ?? '0'));
+        $label = $p['name_product'] . ' — ' . number_format($price) . ' ' . $cur;
+        if (!shop_product_available($p)) {
+            $label = '⛔️ ' . $label;
+        }
+        $kb['inline_keyboard'][] = [[
+            'text' => $label,
+            'callback_data' => 'shopview_' . (int) $p['id'],
+        ]];
+    }
+    $kb['inline_keyboard'][] = [['text' => '🔙 بازگشت', 'callback_data' => 'backuser']];
+    sendmessage($from_id, "🛍 <b>" . store_term('store', 'فروشگاه') . "</b>\nیک محصول را انتخاب کنید:", json_encode($kb), 'html');
+}
+
+/**
+ * Render a shop product to the user: media (image/video/audio) + caption with
+ * name, description and price, plus a Buy / Back inline keyboard.
+ */
+function shop_render_product($from_id, $product)
+{
+    $cur   = store_currency();
+    $price = (int) preg_replace('/[^\d]/', '', (string) ($product['price_product'] ?? '0'));
+    $avail = shop_product_available($product);
+
+    // Send any attached media first (best-effort, non-blocking).
+    // Prefer a cached Telegram file_id; otherwise fall back to the public URL
+    // ($domainhosts/uploads/...). Only the first few media are sent to avoid spam.
+    global $domainhosts;
+    $media = array_slice(product_media_list((int) $product['id']), 0, 5);
+    foreach ($media as $m) {
+        $ref = !empty($m['telegram_file_id'])
+            ? $m['telegram_file_id']
+            : (!empty($domainhosts) ? rtrim($domainhosts, '/') . '/' . ltrim($m['file_path'], '/') : null);
+        if (!$ref) {
+            continue;
+        }
+        if ($m['media_type'] === 'image') {
+            sendphoto($from_id, $ref, '');
+        } elseif ($m['media_type'] === 'video') {
+            sendvideo($from_id, $ref, '');
+        } elseif ($m['media_type'] === 'audio') {
+            telegram('sendAudio', ['chat_id' => $from_id, 'audio' => $ref, 'caption' => '']);
+        }
+    }
+
+    $lines = [];
+    $lines[] = "🛍 <b>" . htmlspecialchars($product['name_product'] ?? '') . "</b>";
+    if (!empty($product['note'])) {
+        $lines[] = "\n" . htmlspecialchars($product['note']);
+    }
+    $lines[] = "\n💰 " . number_format($price) . " " . $cur;
+    if (!$avail) {
+        $lines[] = "\n⛔️ ناموجود";
+    }
+    $caption = implode("\n", $lines);
+
+    $kb = ['inline_keyboard' => []];
+    if ($avail) {
+        $kb['inline_keyboard'][] = [[
+            'text' => "🛒 خرید",
+            'callback_data' => "shopbuy_" . (int) $product['id'],
+        ]];
+    }
+    $kb['inline_keyboard'][] = [[
+        'text' => "🔙 بازگشت",
+        'callback_data' => "backuser",
+    ]];
+
+    sendmessage($from_id, $caption, json_encode($kb), 'html');
+}
+
+/**
+ * Deliver a non-VPN product to the buyer after a successful purchase, based on
+ * product_type. Returns a short human-readable status string for logging.
+ *   - digital_file : sends the configured Telegram file
+ *   - serial_code  : claims & delivers one available code (atomic)
+ *   - service      : sends the delivery note
+ *   - physical     : placeholder until address/shipping flow (step 8c)
+ */
+function shop_deliver_product($from_id, $product, $order_id = null)
+{
+    $type = $product['product_type'] ?? '';
+    switch ($type) {
+        case 'digital_file':
+            $fileId  = product_attr($product, 'file_id');
+            $ftype   = product_attr($product, 'file_type', 'document');
+            $caption = (string) product_attr($product, 'caption', '');
+            if (empty($fileId)) {
+                sendmessage($from_id, "فایل این محصول هنوز تنظیم نشده است. لطفاً با پشتیبانی تماس بگیرید.", null, 'html');
+                return 'digital_file:missing';
+            }
+            if ($ftype === 'photo') {
+                sendphoto($from_id, $fileId, $caption);
+            } elseif ($ftype === 'video') {
+                sendvideo($from_id, $fileId, $caption);
+            } elseif ($ftype === 'audio') {
+                telegram('sendAudio', ['chat_id' => $from_id, 'audio' => $fileId, 'caption' => $caption]);
+            } else {
+                telegram('sendDocument', ['chat_id' => $from_id, 'document' => $fileId, 'caption' => $caption]);
+            }
+            return 'digital_file:sent';
+
+        case 'serial_code':
+            $code = deliver_serial_code((int) $product['id'], (string) $from_id, $order_id);
+            if ($code === null) {
+                sendmessage($from_id, "متأسفانه کد آزادی موجود نیست. لطفاً با پشتیبانی تماس بگیرید.", null, 'html');
+                return 'serial_code:none';
+            }
+            $fmt = (string) product_attr($product, 'code_format', '');
+            $msg = $fmt !== ''
+                ? str_replace('{code}', $code, $fmt)
+                : "✅ کد شما:\n<code>" . htmlspecialchars($code) . "</code>";
+            sendmessage($from_id, $msg, null, 'html');
+            return 'serial_code:delivered';
+
+        case 'service':
+            $note = (string) product_attr($product, 'delivery_note', '');
+            $msg  = $note !== '' ? $note : "✅ خرید شما ثبت شد. به‌زودی پیگیری می‌شود.";
+            sendmessage($from_id, $msg, null, 'html');
+            return 'service:noted';
+
+        case 'physical':
+            // Full address + shipping flow arrives in step 8c. For now confirm
+            // the order so balance/record are consistent.
+            sendmessage($from_id, "✅ سفارش شما ثبت شد. برای هماهنگی ارسال با شما تماس گرفته می‌شود.", null, 'html');
+            return 'physical:recorded';
+    }
+    return 'unknown';
+}
+
+/**
+ * Record a shop order in Payment_report (reusing the existing order table).
+ * Returns the generated order id.
+ */
+function shop_record_order($from_id, $product, $price, $status = 'paid')
+{
+    global $connect;
+    $orderId = 'SHOP-' . time() . '-' . (int) $product['id'];
+    try {
+        $stmt = $connect->prepare(
+            "INSERT INTO Payment_report
+             (id_user, id_order, time, price, payment_Status, Payment_Method, product_id, order_status)
+             VALUES (?,?,?,?,?,?,?,?)"
+        );
+        $now = date('Y-m-d H:i:s');
+        $stmt->execute([
+            (string) $from_id,
+            $orderId,
+            $now,
+            (string) $price,
+            'success',
+            'wallet',
+            (int) $product['id'],
+            $status,
+        ]);
+    } catch (Exception $e) {
+        error_log("shop_record_order error: " . $e->getMessage());
+    }
+    return $orderId;
+}
+
+/**
+ * Central handler for the non-VPN shop callbacks. Returns true if it handled
+ * the incoming callback (caller should then stop processing), false otherwise.
+ * This keeps the entire generic-shop purchase path isolated from the VPN flow.
+ */
+function shop_handle_callback($datain, $from_id, $user)
+{
+    // Show the shop product list.
+    if ($datain === 'shoplist') {
+        shop_render_list($from_id);
+        return true;
+    }
+
+    // View a product.
+    if (preg_match('/^shopview_(\d+)$/', $datain, $m)) {
+        $product = shop_product((int) $m[1]);
+        if (!$product) {
+            sendmessage($from_id, "محصول یافت نشد.", null, 'html');
+            return true;
+        }
+        shop_render_product($from_id, $product);
+        return true;
+    }
+
+    // Buy a product.
+    if (preg_match('/^shopbuy_(\d+)$/', $datain, $m)) {
+        $product = shop_product((int) $m[1]);
+        if (!$product) {
+            sendmessage($from_id, "محصول یافت نشد.", null, 'html');
+            return true;
+        }
+        if (!shop_product_available($product)) {
+            sendmessage($from_id, "⛔️ این محصول در حال حاضر ناموجود است.", null, 'html');
+            return true;
+        }
+        $price   = (int) preg_replace('/[^\d]/', '', (string) ($product['price_product'] ?? '0'));
+        $balance = (int) ($user['Balance'] ?? 0);
+        if ($balance < $price) {
+            $need = number_format($price - $balance);
+            sendmessage(
+                $from_id,
+                "موجودی کیف پول شما کافی نیست. کسری: <b>{$need}</b> " . store_currency(),
+                null,
+                'html'
+            );
+            return true;
+        }
+        // Deduct balance, record order, deliver.
+        $newBalance = $balance - $price;
+        update("user", "Balance", $newBalance, "id", $from_id);
+        $orderId = shop_record_order($from_id, $product, $price, 'paid');
+        $status  = shop_deliver_product($from_id, $product, $orderId);
+
+        // If a serial code couldn't be delivered, refund to keep things fair.
+        if ($status === 'serial_code:none' || $status === 'digital_file:missing') {
+            update("user", "Balance", $balance, "id", $from_id);
+            return true;
+        }
+        // Notify admins of the new shop order.
+        $admins = select("admin", "id_admin", null, null, "FETCH_COLUMN");
+        if (is_array($admins)) {
+            $name = htmlspecialchars($product['name_product'] ?? '');
+            foreach ($admins as $aid) {
+                sendmessage(
+                    $aid,
+                    "🛒 سفارش جدید\nمحصول: {$name}\nمبلغ: " . number_format($price) . " " . store_currency()
+                        . "\nکاربر: <code>" . htmlspecialchars((string) $from_id) . "</code>\nسفارش: <code>{$orderId}</code>",
+                    null,
+                    'html'
+                );
+            }
+        }
+        return true;
+    }
+
+    return false;
+}
+
 function generateAuthStr($length = 10)
 {
     $characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';

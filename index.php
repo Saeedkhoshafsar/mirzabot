@@ -611,6 +611,14 @@ if ($text == "/start" || $datain == "start" || $text == "start") {
     update("user", "Processing_value", $usernameconfig, "id", $from_id);
     sendmessage($from_id, $textbotlang['textbot']['selectLocation'], $list_marzban_panel_user, 'html');
     step('getdata', $from_id);
+} elseif (
+    $datain === 'shoplist' || $text === '/shop'
+    || preg_match('/^shop(view|buy)_\d+$/', $datain)
+) {
+    // Generic (non-VPN) shop purchase path — fully isolated from the VPN flow.
+    $shopData = ($text === '/shop') ? 'shoplist' : $datain;
+    shop_handle_callback($shopData, $from_id, $user);
+    return;
 } elseif (preg_match('/locationnotuser_(.*)/', $datain, $dataget)) {
     $marzban_list_get = select("marzban_panel", "*", "code_panel", $dataget[1]);
     update("user", "Processing_value_four", $marzban_list_get['code_panel'], "id", $from_id);

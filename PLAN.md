@@ -297,15 +297,20 @@ n8n فقط یک **افزونهٔ اختیاری** خواهد بود: بعداً 
   - [x] حذف فقط کدهای آزاد مجاز است (تاریخچهٔ فروش حفظ می‌شود)
   - یادداشت: مثل استپ ۴، صفحهٔ self-contained ساخته شد (الگوی کدبیس) به‌جای endpoint در `api/product.php`.
 
-- [ ] استپ ۷ — منطق خرید عمومی در ربات (Checkout) بر اساس نوع محصول
-  - [ ] افزودن شاخهٔ تحویل بر اساس `product_type` در مسیر خرید `index.php`
-  - [ ] نمایش محصول: رسانه (عکس/ویدیو/صوت) + توضیح + قیمت + واریانت‌های موجود
-  - [ ] انتخاب واریانت (رنگ/سایز) — فقط واریانت‌های دارای موجودی؛ اعمال اختلاف قیمت
-  - [ ] انتخاب تعداد (quantity) با چک موجودی
-  - [ ] `physical` → آدرس (استپ ۸ج) + روش ارسال (از shipping_methods) + هزینهٔ ارسال در فاکتور + ثبت سفارش؛ `digital_file` → ارسال فایل تلگرام؛ `serial_code` → تحویل کد آزاد (استپ ۶)؛ `service` → پیام تحویل؛ `vpn` → رفتار فعلی دست‌نخورده
-  - [ ] خلاصهٔ سفارش قبل از پرداخت (قلم + واریانت + تعداد + ارسال + تخفیف + جمع کل)
-  - [ ] ثبت فاکتور/سفارش با اطلاعات نوع محصول، واریانت، تعداد، روش ارسال در `Payment_report`
-  - [ ] تست رگرسیون مسیر خرید VPN (نباید هیچ تغییری در تجربهٔ VPN ایجاد شود)
+- [x] استپ ۷ — منطق خرید عمومی در ربات (Checkout) بر اساس نوع محصول  ✅ 2026-06-08
+  - [x] **مسیر خرید کاملاً مجزا و ایزوله از VPN**: شاخهٔ `shoplist`/`shopview_`/`shopbuy_` + دستور `/shop` در ابتدای زنجیرهٔ dispatch `index.php` (قبل از شاخه‌های VPN) → هیچ تماسی با منطق VPN ندارد
+  - [x] نمایش محصول: رسانه (عکس/ویدیو/صوت از `product_media` با file_id یا URL دامنه) + نام + توضیح + قیمت + دکمهٔ خرید/بازگشت
+  - [x] لیست فروشگاه: `shop_render_list()` فقط محصولات `product_type <> 'vpn'` با اسکوپ ربات (`bot_id`)
+  - [x] تحویل بر اساس نوع: `digital_file` → ارسال فایل تلگرام (photo/video/audio/document)؛ `serial_code` → `deliver_serial_code()` اتمیک (استپ ۶)؛ `service` → پیام تحویل؛ `physical` → ثبت سفارش + پیام هماهنگی (جریان کامل آدرس/ارسال در استپ ۸ج)
+  - [x] چک موجودی پیش از خرید (`shop_product_available()`؛ برای serial_code نیاز به کد آزاد)
+  - [x] چک کیف‌پول + کسر `Balance` + ثبت سفارش در `Payment_report` (با ستون‌های جدید `product_id`/`order_status`)
+  - [x] **بازگشت خودکار وجه** اگر تحویل کد/فایل ممکن نشد (refund safety)
+  - [x] اطلاع‌رسانی سفارش جدید به ادمین‌ها
+  - [x] گسترش `Payment_report` (non-destructive) با ستون‌های فروشگاهی: product_id, order_status, quantity, variant, tracking_code, shipping_carrier, carrier_name, shipping_method, shipping_cost, address_id, admin_note (زیرساخت استپ ۸ب)
+  - [x] توابع جدید در `function.php`: `store_mode/store_currency/shop_product/shop_product_list/shop_product_available/shop_render_list/shop_render_product/shop_deliver_product/shop_record_order/shop_handle_callback`
+  - [x] رگرسیون: مسیر VPN دست‌نخورده (شاخهٔ shop فقط روی الگوهای `shop*` فعال می‌شود؛ همهٔ فایل‌ها lint سالم)
+  - [ ] واریانت/تعداد/خلاصهٔ سفارش پیش از پرداخت و هزینهٔ ارسال در فاکتور → در استپ ۸ج (همراه آدرس و موجودی) تکمیل می‌شود
+  - یادداشت: دکمهٔ فروشگاه به منوی اصلی اضافه نشد چون کیبورد اصلی قابل‌تنظیم/داینامیک است (ریسک رگرسیون VPN)؛ به‌جای آن دستور `/shop` + کال‌بک‌ها. اتصال به منو در ویزارد/قالب استپ ۹ انجام می‌شود.
 
 - [ ] استپ ۸ — تخفیف‌ها و کدهای تخفیف حرفه‌ای (Discounts / Coupons)
   - زیرساخت موجود کشف‌شده: `DiscountSell` (codeDiscount/limitDiscount/usedDiscount/type/time/agent)، `Discount` (کد شارژ کیف‌پول)، `Giftcodeconsumed`. روی این‌ها می‌سازیم نه از صفر.

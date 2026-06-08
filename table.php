@@ -751,6 +751,20 @@ try {
             echo "The id_invoice field was added ✅";
         }
     }
+    // Generic e-commerce order columns (non-destructive). Used by the shop
+    // checkout (step 7) and the orders/tracking panel (step 8b). VPN rows keep
+    // these NULL and are unaffected.
+    addFieldToTable("Payment_report", "product_id", null, "INT(11)");
+    addFieldToTable("Payment_report", "order_status", null, "varchar(30)");
+    addFieldToTable("Payment_report", "quantity", "1", "INT(11)");
+    addFieldToTable("Payment_report", "variant", null, "TEXT");
+    addFieldToTable("Payment_report", "tracking_code", null, "varchar(200)");
+    addFieldToTable("Payment_report", "shipping_carrier", null, "varchar(60)");
+    addFieldToTable("Payment_report", "carrier_name", null, "varchar(200)");
+    addFieldToTable("Payment_report", "shipping_method", null, "varchar(200)");
+    addFieldToTable("Payment_report", "shipping_cost", "0", "varchar(60)");
+    addFieldToTable("Payment_report", "address_id", null, "INT(11)");
+    addFieldToTable("Payment_report", "admin_note", null, "TEXT");
 } catch (Exception $e) {
     file_put_contents('error_log', $e->getMessage());
 }
