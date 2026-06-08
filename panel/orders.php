@@ -61,17 +61,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
     } catch (Exception $e) {
         flash('error', 'خطا در بروزرسانی: ' . $e->getMessage());
     }
-    header('Location: orders.php' . (($_GET['filter'] ?? '') !== '' ? '?filter=' . urlencode($_GET['filter']) : ''));
+    $qs = [];
+    if (($_GET['filter'] ?? '') !== '') { $qs[] = 'filter=' . urlencode((string) $_GET['filter']); }
+    if (($_GET['q'] ?? '') !== '')      { $qs[] = 'q=' . urlencode((string) $_GET['q']); }
+    header('Location: orders.php' . ($qs ? '?' . implode('&', $qs) : ''));
     exit;
 }
 
 // --------------------------------------------------------------- LOAD -------
 $filter = (string) ($_GET['filter'] ?? '');
+$q      = trim((string) ($_GET['q'] ?? ''));
 $params = [];
 $where  = "WHERE product_id IS NOT NULL AND order_status IS NOT NULL";
 if ($filter !== '' && isset($statuses[$filter])) {
     $where .= " AND order_status = ?";
     $params[] = $filter;
+}
+if ($q !== '') {
+    // Simple search across order id / user id / tracking code.
+    $where .= " AND (id_order LIKE ? OR id_user LIKE ? OR tracking_code LIKE ?)";
+    $like = '%' . $q . '%';
+    $params[] = $like; $params[] = $like; $params[] = $like;
 }
 $orders = db_fetchAll(
     $pdo,
@@ -122,10 +132,20 @@ include __DIR__ . '/inc/layout_head.php';
     <div class="notice notice-no"><?= htmlspecialchars($flashErr) ?></div>
 <?php endif; ?>
 
+<form method="GET" action="orders.php" style="margin-bottom:12px" class="fade-up d1">
+    <?php if ($filter !== ''): ?><input type="hidden" name="filter" value="<?= htmlspecialchars($filter) ?>"><?php endif; ?>
+    <div style="display:flex;gap:8px;max-width:520px">
+        <input type="text" name="q" class="input" value="<?= htmlspecialchars($q) ?>" placeholder="جستجو: کد سفارش، شناسهٔ کاربر یا کد رهگیری">
+        <button type="submit" class="btn btn-primary btn-sm"><?= icon('search', 14) ?> جستجو</button>
+        <?php if ($q !== ''): ?><a href="orders.php<?= $filter !== '' ? '?filter=' . urlencode($filter) : '' ?>" class="btn btn-ghost btn-sm">پاک کردن</a><?php endif; ?>
+    </div>
+</form>
+
 <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px" class="fade-up d1">
-    <a href="orders.php" class="btn btn-sm <?= $filter === '' ? 'btn-primary' : 'btn-ghost' ?>">همه (<?= (int) $counts['all'] ?>)</a>
+    <?php $qp = $q !== '' ? '&q=' . urlencode($q) : ''; ?>
+    <a href="orders.php<?= $q !== '' ? '?q=' . urlencode($q) : '' ?>" class="btn btn-sm <?= $filter === '' ? 'btn-primary' : 'btn-ghost' ?>">همه (<?= (int) $counts['all'] ?>)</a>
     <?php foreach ($statuses as $sv => $sl): ?>
-        <a href="orders.php?filter=<?= urlencode($sv) ?>" class="btn btn-sm <?= $filter === $sv ? 'btn-primary' : 'btn-ghost' ?>">
+        <a href="orders.php?filter=<?= urlencode($sv) . $qp ?>" class="btn btn-sm <?= $filter === $sv ? 'btn-primary' : 'btn-ghost' ?>">
             <?= htmlspecialchars($sl) ?> (<?= (int) ($counts[$sv] ?? 0) ?>)
         </a>
     <?php endforeach; ?>
@@ -172,7 +192,13 @@ include __DIR__ . '/inc/layout_head.php';
                     <?php if (!empty($addr['postal_code'])): ?>🏷 کدپستی: <span style="font-family:var(--mono)"><?= htmlspecialchars((string) $addr['postal_code']) ?></span><?php endif; ?>
                 </div>
             <?php endif; ?>
-            <form method="POST" action="orders.php<?= $filter !== '' ? '?filter=' . urlencode($filter) : '' ?>">
+            <?php
+                $formQs = [];
+                if ($filter !== '') { $formQs[] = 'filter=' . urlencode($filter); }
+                if ($q !== '')      { $formQs[] = 'q=' . urlencode($q); }
+                $formAction = 'orders.php' . ($formQs ? '?' . implode('&', $formQs) : '');
+            ?>
+            <form method="POST" action="<?= htmlspecialchars($formAction) ?>">
                 <input type="hidden" name="_csrf" value="<?= csrf_token() ?>">
                 <input type="hidden" name="action" value="update_order">
                 <input type="hidden" name="order_id" value="<?= htmlspecialchars((string) $o['id_order']) ?>">

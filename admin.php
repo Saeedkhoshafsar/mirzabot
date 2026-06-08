@@ -2511,6 +2511,163 @@ elseif ($datain == "systemsms") {
     step('home', $from_id);
 } elseif ($text == $textbotlang['keyboard']['shopSettings'] && $adminrulecheck['rule'] == "administrator") {
     sendmessage($from_id, $textbotlang['users']['selectoption'], $shopkeyboard, 'HTML');
+    // Quick access to physical-order management (tracking/status) from Telegram.
+    $ordersInline = json_encode(['inline_keyboard' => [[
+        ['text' => '📦 مدیریت سفارش‌ها و کد رهگیری', 'callback_data' => 'shoporders_1'],
+    ]]]);
+    sendmessage($from_id, "🛒 برای دیدن سفارش‌های فیزیکی و ثبت کد رهگیری، دکمهٔ زیر را بزنید:", $ordersInline, 'HTML');
+
+/* =====================================================================
+ * Telegram-side physical order management (mirrors panel/orders.php).
+ * Lets the admin browse recent orders, open one, change its status, and
+ * register a shipping carrier + tracking code — all from the phone.
+ * Web panel remains the place for API keys / automation / store config.
+ * ===================================================================== */
+} elseif (preg_match('/^shoporders_(\d+)$/', $datain, $om) && $adminrulecheck['rule'] == "administrator") {
+    deletemessage($from_id, $message_id);
+    $page    = max(1, (int) $om[1]);
+    $perPage = 6;
+    $offset  = ($page - 1) * $perPage;
+    $rows = [];
+    try {
+        $stmt = $pdo->prepare(
+            "SELECT id_order, id_user, order_status, tracking_code, price, at_updated
+             FROM Payment_report
+             WHERE product_id IS NOT NULL AND product_id > 0
+             ORDER BY id DESC LIMIT ? OFFSET ?"
+        );
+        $stmt->bindValue(1, $perPage, PDO::PARAM_INT);
+        $stmt->bindValue(2, $offset, PDO::PARAM_INT);
+        $stmt->execute();
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    } catch (Exception $e) {
+        error_log("tg shoporders error: " . $e->getMessage());
+    }
+    if (!$rows) {
+        sendmessage($from_id, "📦 سفارش فیزیکی‌ای یافت نشد.", null, 'HTML');
+        return;
+    }
+    $kb = ['inline_keyboard' => []];
+    foreach ($rows as $r) {
+        $lbl = function_exists('order_status_label') ? order_status_label($r['order_status'] ?? '') : ($r['order_status'] ?? '—');
+        $kb['inline_keyboard'][] = [[
+            'text' => "🧾 #{$r['id_order']} — {$lbl}",
+            'callback_data' => "shoporder_{$r['id_order']}",
+        ]];
+    }
+    $nav = [];
+    if ($page > 1) {
+        $nav[] = ['text' => '« قبلی', 'callback_data' => 'shoporders_' . ($page - 1)];
+    }
+    if (count($rows) === $perPage) {
+        $nav[] = ['text' => 'بعدی »', 'callback_data' => 'shoporders_' . ($page + 1)];
+    }
+    if ($nav) {
+        $kb['inline_keyboard'][] = $nav;
+    }
+    sendmessage($from_id, "📦 <b>سفارش‌های فیزیکی</b> (صفحهٔ {$page})\nیک سفارش را برای مدیریت انتخاب کنید:", json_encode($kb), 'HTML');
+
+} elseif (preg_match('/^shoporder_(.+)$/', $datain, $om) && $adminrulecheck['rule'] == "administrator") {
+    deletemessage($from_id, $message_id);
+    $oid = $om[1];
+    $o = function_exists('get_order') ? get_order($oid) : select("Payment_report", "*", "id_order", $oid, "select");
+    if (!$o) {
+        sendmessage($from_id, "❌ سفارش یافت نشد.", null, 'HTML');
+        return;
+    }
+    $lbl  = function_exists('order_status_label') ? order_status_label($o['order_status'] ?? '') : ($o['order_status'] ?? '—');
+    $cur  = function_exists('store_currency') ? store_currency() : 'تومان';
+    $price = isset($o['price']) ? number_format((int) $o['price']) : '—';
+    $track = trim((string) ($o['tracking_code'] ?? ''));
+    $carrierName = (string) ($o['carrier_name'] ?? '');
+    $msg  = "🧾 <b>سفارش #{$oid}</b>\n";
+    $msg .= "👤 کاربر: <code>" . htmlspecialchars((string) ($o['id_user'] ?? '')) . "</code>\n";
+    $msg .= "💰 مبلغ: {$price} {$cur}\n";
+    $msg .= "📊 وضعیت: {$lbl}\n";
+    if ($carrierName !== '') {
+        $msg .= "🚚 شرکت: " . htmlspecialchars($carrierName) . "\n";
+    }
+    if ($track !== '') {
+        $msg .= "🔖 کد رهگیری: <code>" . htmlspecialchars($track) . "</code>\n";
+        $turl = function_exists('carrier_tracking_url') ? carrier_tracking_url((string) ($o['shipping_carrier'] ?? ''), $track) : '';
+        if ($turl !== '') {
+            $msg .= "🔗 <a href=\"" . htmlspecialchars($turl) . "\">پیگیری مرسوله</a>\n";
+        }
+    }
+    $kb = ['inline_keyboard' => [
+        [['text' => '🚚 ثبت / تغییر کد رهگیری', 'callback_data' => "shipord_{$oid}"]],
+        [
+            ['text' => '📦 آماده‌سازی', 'callback_data' => "ordst_{$oid}_processing"],
+            ['text' => '✅ تحویل شد', 'callback_data' => "ordst_{$oid}_delivered"],
+        ],
+        [['text' => '❌ لغو سفارش', 'callback_data' => "ordst_{$oid}_canceled"]],
+        [['text' => '« بازگشت به فهرست', 'callback_data' => 'shoporders_1']],
+    ]];
+    sendmessage($from_id, $msg, json_encode($kb), 'HTML');
+
+} elseif (preg_match('/^ordst_(.+)_([a-z]+)$/', $datain, $om) && $adminrulecheck['rule'] == "administrator") {
+    $oid = $om[1];
+    $st  = $om[2];
+    $valid = function_exists('order_statuses') ? array_keys(order_statuses()) : ['processing', 'delivered', 'canceled'];
+    if (!in_array($st, $valid, true)) {
+        sendmessage($from_id, "❌ وضعیت نامعتبر.", null, 'HTML');
+        return;
+    }
+    $ok = function_exists('set_order_status') ? set_order_status($oid, $st) : false;
+    $lbl = function_exists('order_status_label') ? order_status_label($st) : $st;
+    $back = json_encode(['inline_keyboard' => [[['text' => '« بازگشت', 'callback_data' => "shoporder_{$oid}"]]]]);
+    sendmessage($from_id, $ok ? "✅ وضعیت سفارش #{$oid} به «{$lbl}» تغییر کرد." : "❌ خطا در تغییر وضعیت.", $back, 'HTML');
+
+} elseif (preg_match('/^shipord_(.+)$/', $datain, $om) && $adminrulecheck['rule'] == "administrator") {
+    deletemessage($from_id, $message_id);
+    $oid = $om[1];
+    savedata("clear", "track_order_id", $oid);
+    $carriers = function_exists('shipping_carriers') ? shipping_carriers() : [];
+    $kb = ['inline_keyboard' => []];
+    $rowbuf = [];
+    foreach ($carriers as $code => $meta) {
+        $rowbuf[] = ['text' => $meta['name'], 'callback_data' => "trkcar_{$code}"];
+        if (count($rowbuf) === 2) {
+            $kb['inline_keyboard'][] = $rowbuf;
+            $rowbuf = [];
+        }
+    }
+    if ($rowbuf) {
+        $kb['inline_keyboard'][] = $rowbuf;
+    }
+    $kb['inline_keyboard'][] = [['text' => '« انصراف', 'callback_data' => "shoporder_{$oid}"]];
+    sendmessage($from_id, "🚚 شرکت ارسال سفارش #{$oid} را انتخاب کنید:", json_encode($kb), 'HTML');
+
+} elseif (preg_match('/^trkcar_(.+)$/', $datain, $om) && $adminrulecheck['rule'] == "administrator") {
+    deletemessage($from_id, $message_id);
+    $carrier = $om[1];
+    savedata("save", "track_carrier", $carrier);
+    $cname = function_exists('shipping_carriers') ? (shipping_carriers()[$carrier]['name'] ?? $carrier) : $carrier;
+    sendmessage($from_id, "✍️ کد رهگیری مرسوله را برای «{$cname}» ارسال کنید:\n(برای انصراف /panel را بزنید)", $backadmin, 'HTML');
+    step('awaiting_tracking_code', $from_id);
+
+} elseif ($user['step'] == "awaiting_tracking_code" && $adminrulecheck['rule'] == "administrator") {
+    $code  = trim((string) $text);
+    $pv    = select("user", "*", "id", $from_id, "select");
+    $pvarr = is_array($pv) && !empty($pv['Processing_value']) ? json_decode($pv['Processing_value'], true) : [];
+    $oid     = is_array($pvarr) ? ($pvarr['track_order_id'] ?? null) : null;
+    $carrier = is_array($pvarr) ? ($pvarr['track_carrier'] ?? null) : null;
+    if ($code === '' || $oid === null || $carrier === null) {
+        sendmessage($from_id, "❌ اطلاعات ناقص است؛ دوباره از فهرست سفارش‌ها شروع کنید.", $shopkeyboard, 'HTML');
+        step('home', $from_id);
+        return;
+    }
+    $ok = function_exists('set_order_tracking') ? set_order_tracking($oid, $carrier, $code, true) : false;
+    step('home', $from_id);
+    if ($ok) {
+        $turl = function_exists('carrier_tracking_url') ? carrier_tracking_url($carrier, $code) : '';
+        $extra = $turl !== '' ? "\n🔗 <a href=\"" . htmlspecialchars($turl) . "\">پیگیری مرسوله</a>" : '';
+        $back = json_encode(['inline_keyboard' => [[['text' => '🧾 مشاهدهٔ سفارش', 'callback_data' => "shoporder_{$oid}"]]]]);
+        sendmessage($from_id, "✅ کد رهگیری برای سفارش #{$oid} ثبت شد و وضعیت به «ارسال‌شده» تغییر کرد.{$extra}", $back, 'HTML');
+    } else {
+        sendmessage($from_id, "❌ خطا در ثبت کد رهگیری.", $shopkeyboard, 'HTML');
+    }
+
 } elseif ($text == $textbotlang['keyboard']['addProduct'] && $adminrulecheck['rule'] == "administrator") {
     $locationproduct = select("marzban_panel", "*", null, null, "count");
     if ($locationproduct == 0) {
