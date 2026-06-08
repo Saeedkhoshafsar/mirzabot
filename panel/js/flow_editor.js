@@ -667,6 +667,13 @@
         alert('عنوان نود را وارد کنید.');
         return;
       }
+      // Two-step confirmation when EDITING a system (protected) node, mirroring
+      // the delete protection. New nodes are never system, so this only fires on
+      // edits of core buttons (e.g. the main menu root).
+      if (!panel.isNew && d.system) {
+        if (!confirm('این نود «سیستمی» محافظت‌شده است. تغییر آن می‌تواند رفتار ربات را خراب کند. ادامه می‌دهید؟')) return;
+        if (!confirm('تأیید نهایی: تغییرات روی نود سیستمی «' + d.label.trim() + '» اعمال شود؟')) return;
+      }
       // normalise file_extensions text -> array (server re-validates + strips dangerous)
       var cfg = Object.assign({}, d.config || {});
       if (typeof cfg.file_extensions === 'string') {
