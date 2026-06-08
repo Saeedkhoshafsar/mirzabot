@@ -81,6 +81,9 @@ try {
         addFieldToTable($tableName, 'codeInvitation', null);
         addFieldToTable($tableName, 'pricediscount', "0");
         addFieldToTable($tableName, 'hide_mini_app_instruction', '0', "VARCHAR(20)");
+        // Shop multi-item cart (JSON). Isolated from VPN's Processing_value so the
+        // VPN purchase flow is never touched. '' / NULL means "empty cart".
+        addFieldToTable($tableName, 'shop_cart', '', "TEXT");
 
         // --- Repair NOT NULL columns that have no DEFAULT on already-existing
         // installs. Under MySQL strict mode (STRICT_TRANS_TABLES, the default

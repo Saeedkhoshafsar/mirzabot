@@ -2867,6 +2867,9 @@ function shop_render_list($from_id)
         ]];
     }
     $kb['inline_keyboard'][] = [['text' => '🔍 جستجوی محصول', 'callback_data' => 'shopsearch']];
+    $cartN = shop_cart_count($from_id);
+    $cartLabel = $cartN > 0 ? "🛒 سبد خرید ({$cartN})" : "🛒 سبد خرید";
+    $kb['inline_keyboard'][] = [['text' => $cartLabel, 'callback_data' => 'shopcart']];
     $kb['inline_keyboard'][] = [['text' => '🔙 بازگشت', 'callback_data' => 'backuser']];
     sendmessage($from_id, "🛍 <b>" . store_term('store', 'فروشگاه') . "</b>\nیک محصول را انتخاب کنید:", json_encode($kb), 'html');
 }
@@ -3015,18 +3018,22 @@ function shop_render_product($from_id, $product)
     $kb = ['inline_keyboard' => []];
     if ($avail) {
         $kb['inline_keyboard'][] = [[
-            'text' => "🛒 خرید",
+            'text' => "🛒 خرید فوری",
             'callback_data' => "shopbuy_" . (int) $product['id'],
+        ]];
+        $kb['inline_keyboard'][] = [[
+            'text' => "➕ افزودن به سبد",
+            'callback_data' => "cartadd_" . (int) $product['id'],
         ]];
         $kb['inline_keyboard'][] = [[
             'text' => "🏷 کد تخفیف",
             'callback_data' => "shopcoupon_" . (int) $product['id'],
         ]];
     }
-    $kb['inline_keyboard'][] = [[
-        'text' => "🔙 بازگشت",
-        'callback_data' => "backuser",
-    ]];
+    $kb['inline_keyboard'][] = [
+        ['text' => "🛒 سبد خرید", 'callback_data' => "shopcart"],
+        ['text' => "🔙 بازگشت", 'callback_data' => "backuser"],
+    ];
 
     sendmessage($from_id, $caption, json_encode($kb), 'html');
 }
@@ -3098,6 +3105,201 @@ function shop_deliver_product($from_id, $product, $order_id = null)
  * Record a shop order in Payment_report (reusing the existing order table).
  * Returns the generated order id.
  */
+// ===========================================================================
+// Multi-item shopping cart (step: سبد چندقلمی + تعداد). The cart lives in the
+// dedicated user.shop_cart JSON column — completely isolated from the VPN flow
+// (which uses Processing_value). Shape:
+//   [ { "id": <product_id>, "qty": <int>, "variant": <string|null> }, ... ]
+// ===========================================================================
+
+/**
+ * Read the current user's cart as a normalised array of line items.
+ */
+function shop_cart_get($from_id)
+{
+    $row = select("user", "shop_cart", "id", $from_id, "select");
+    $raw = '';
+    if (is_array($row)) {
+        $raw = (string) ($row['shop_cart'] ?? '');
+    } elseif (is_string($row)) {
+        $raw = $row;
+    }
+    if ($raw === '' || $raw === 'none' || $raw === '0') {
+        return [];
+    }
+    $items = json_decode($raw, true);
+    if (!is_array($items)) {
+        return [];
+    }
+    $out = [];
+    foreach ($items as $it) {
+        if (!is_array($it) || empty($it['id'])) {
+            continue;
+        }
+        $qty = (int) ($it['qty'] ?? 1);
+        if ($qty < 1) {
+            $qty = 1;
+        }
+        $out[] = [
+            'id'      => (int) $it['id'],
+            'qty'     => $qty,
+            'variant' => isset($it['variant']) && $it['variant'] !== '' ? (string) $it['variant'] : null,
+        ];
+    }
+    return $out;
+}
+
+/**
+ * Persist a cart array back to the user row.
+ */
+function shop_cart_save($from_id, array $items)
+{
+    update("user", "shop_cart", json_encode(array_values($items), JSON_UNESCAPED_UNICODE), "id", $from_id);
+}
+
+/**
+ * Empty the cart.
+ */
+function shop_cart_clear($from_id)
+{
+    update("user", "shop_cart", "", "id", $from_id);
+}
+
+/**
+ * Add a product (optionally a variant) to the cart, or bump its quantity if it
+ * is already present with the same variant. Returns the new quantity for that
+ * line.
+ */
+function shop_cart_add($from_id, $product_id, $variant = null, $qty = 1)
+{
+    $product_id = (int) $product_id;
+    $variant    = ($variant !== null && $variant !== '') ? (string) $variant : null;
+    $qty        = max(1, (int) $qty);
+    $items      = shop_cart_get($from_id);
+    $found      = false;
+    $newQty     = $qty;
+    foreach ($items as &$it) {
+        if ($it['id'] === $product_id && $it['variant'] === $variant) {
+            $it['qty'] += $qty;
+            $newQty     = $it['qty'];
+            $found      = true;
+            break;
+        }
+    }
+    unset($it);
+    if (!$found) {
+        $items[] = ['id' => $product_id, 'qty' => $qty, 'variant' => $variant];
+    }
+    shop_cart_save($from_id, $items);
+    return $newQty;
+}
+
+/**
+ * Set the quantity of the Nth cart line (0-based). A qty of 0 (or less) removes
+ * the line. Returns the resulting cart array.
+ */
+function shop_cart_set_qty($from_id, $index, $qty)
+{
+    $items = shop_cart_get($from_id);
+    $index = (int) $index;
+    if (!isset($items[$index])) {
+        return $items;
+    }
+    $qty = (int) $qty;
+    if ($qty < 1) {
+        array_splice($items, $index, 1);
+    } else {
+        $items[$index]['qty'] = $qty;
+    }
+    shop_cart_save($from_id, $items);
+    return $items;
+}
+
+/**
+ * Remove the Nth cart line (0-based). Returns the resulting cart array.
+ */
+function shop_cart_remove($from_id, $index)
+{
+    return shop_cart_set_qty($from_id, $index, 0);
+}
+
+/**
+ * Total item count (sum of quantities) in the cart.
+ */
+function shop_cart_count($from_id)
+{
+    $n = 0;
+    foreach (shop_cart_get($from_id) as $it) {
+        $n += (int) $it['qty'];
+    }
+    return $n;
+}
+
+/**
+ * Unit price for a product, including a variant's price_diff when applicable.
+ */
+function shop_line_unit_price($product, $variant = null)
+{
+    $base = (int) preg_replace('/[^\d]/', '', (string) ($product['price_product'] ?? '0'));
+    if ($variant !== null && $variant !== '') {
+        $variants = product_attr($product, 'variants', null);
+        if (is_array($variants)) {
+            foreach ($variants as $v) {
+                $vk = trim((string) ($v['sku'] ?? '')) !== ''
+                    ? (string) $v['sku']
+                    : trim((string) ($v['color'] ?? '') . ' ' . (string) ($v['size'] ?? ''));
+                if ($vk === (string) $variant) {
+                    $base += (int) preg_replace('/[^\-\d]/', '', (string) ($v['price_diff'] ?? '0'));
+                    break;
+                }
+            }
+        }
+    }
+    return max(0, $base);
+}
+
+/**
+ * Resolve the cart into detailed line items + grand total. Returns:
+ *   ['lines' => [ ['product'=>..,'qty'=>..,'variant'=>..,'unit'=>..,'subtotal'=>..], .. ],
+ *    'total' => <int>, 'count' => <int>, 'missing' => <int removed unavailable lines>]
+ * Lines whose product no longer exists are silently dropped (cart self-heals).
+ */
+function shop_cart_resolve($from_id)
+{
+    $items   = shop_cart_get($from_id);
+    $lines   = [];
+    $total   = 0;
+    $count   = 0;
+    $changed = false;
+    foreach ($items as $it) {
+        $product = shop_product((int) $it['id']);
+        if (!$product) {
+            $changed = true; // drop dangling line
+            continue;
+        }
+        $unit     = shop_line_unit_price($product, $it['variant']);
+        $subtotal = $unit * (int) $it['qty'];
+        $total   += $subtotal;
+        $count   += (int) $it['qty'];
+        $lines[]  = [
+            'product'  => $product,
+            'qty'      => (int) $it['qty'],
+            'variant'  => $it['variant'],
+            'unit'     => $unit,
+            'subtotal' => $subtotal,
+        ];
+    }
+    if ($changed) {
+        // Re-save the healed cart (only surviving lines).
+        $clean = [];
+        foreach ($lines as $l) {
+            $clean[] = ['id' => (int) $l['product']['id'], 'qty' => $l['qty'], 'variant' => $l['variant']];
+        }
+        shop_cart_save($from_id, $clean);
+    }
+    return ['lines' => $lines, 'total' => $total, 'count' => $count];
+}
+
 function shop_record_order($from_id, $product, $price, $status = 'paid', $address_id = null)
 {
     global $connect;
@@ -3332,6 +3534,160 @@ function generate_discount_codes($count, array $opts)
     return $res;
 }
 
+// ===========================================================================
+// Cart rendering + multi-item checkout (سبد چندقلمی).
+// ===========================================================================
+
+/**
+ * Render the user's cart: each line with qty +/- and remove buttons, the grand
+ * total, plus "checkout" / "continue shopping" / "clear" actions.
+ */
+function shop_render_cart($from_id)
+{
+    $cur  = store_currency();
+    $data = shop_cart_resolve($from_id);
+    if (empty($data['lines'])) {
+        $kb = json_encode(['inline_keyboard' => [
+            [['text' => "🛍 مشاهدهٔ محصولات", 'callback_data' => "shoplist"]],
+            [['text' => "🔙 بازگشت", 'callback_data' => "backuser"]],
+        ]]);
+        sendmessage($from_id, "🛒 سبد خرید شما خالی است.", $kb, 'html');
+        return;
+    }
+
+    $lines = ["🛒 <b>سبد خرید شما</b>\n"];
+    $rows  = [];
+    foreach ($data['lines'] as $i => $l) {
+        $name = htmlspecialchars($l['product']['name_product'] ?? '');
+        $var  = $l['variant'] !== null ? " (" . htmlspecialchars($l['variant']) . ")" : '';
+        $lines[] = ($i + 1) . ". {$name}{$var}\n   "
+            . $l['qty'] . " × " . number_format($l['unit']) . " = <b>"
+            . number_format($l['subtotal']) . "</b> {$cur}";
+        // qty controls for this line (index-based, stable within this render).
+        $rows[] = [
+            ['text' => "➖", 'callback_data' => "cartdec_{$i}"],
+            ['text' => "{$l['qty']} عدد", 'callback_data' => "cartnoop"],
+            ['text' => "➕", 'callback_data' => "cartinc_{$i}"],
+            ['text' => "🗑", 'callback_data' => "cartdel_{$i}"],
+        ];
+    }
+    $lines[] = "\n💰 جمع کل: <b>" . number_format($data['total']) . "</b> {$cur}";
+
+    $rows[] = [['text' => "✅ تسویه و پرداخت", 'callback_data' => "cartcheckout"]];
+    $rows[] = [['text' => "🏷 کد تخفیف", 'callback_data' => "cartcoupon"]];
+    $rows[] = [
+        ['text' => "🛍 ادامهٔ خرید", 'callback_data' => "shoplist"],
+        ['text' => "🗑 خالی‌کردن", 'callback_data' => "cartclear"],
+    ];
+    $rows[] = [['text' => "🔙 بازگشت", 'callback_data' => "backuser"]];
+
+    sendmessage($from_id, implode("\n", $lines), json_encode(['inline_keyboard' => $rows]), 'html');
+}
+
+/**
+ * Check out the entire cart in one go: validate availability, apply an optional
+ * coupon (stored as shop_dc:{code} in Processing_value), deduct balance, record
+ * one order per line, deliver each line, decrement stock and notify admins.
+ * Returns true if handled.
+ */
+function shop_checkout_cart($from_id, $user)
+{
+    $cur  = store_currency();
+    $data = shop_cart_resolve($from_id);
+    if (empty($data['lines'])) {
+        sendmessage($from_id, "🛒 سبد خرید شما خالی است.", null, 'html');
+        return true;
+    }
+
+    // Availability re-check for every line before charging anything.
+    foreach ($data['lines'] as $l) {
+        if (!shop_product_available($l['product'])) {
+            sendmessage($from_id, "⛔️ «" . htmlspecialchars($l['product']['name_product'] ?? '') . "» ناموجود شد. لطفاً سبد را به‌روزرسانی کنید.", null, 'html');
+            return true;
+        }
+    }
+
+    $total = (int) $data['total'];
+
+    // Re-validate any applied coupon against the cart total.
+    $couponCode = null;
+    $discount   = 0;
+    $pv = $user['Processing_value'] ?? '';
+    if (is_string($pv) && strpos($pv, 'shop_dc:') === 0) {
+        $maybe = substr($pv, strlen('shop_dc:'));
+        $chk = validate_discount_code($maybe, $from_id, $total);
+        if ($chk['ok']) {
+            $couponCode = $maybe;
+            $discount   = (int) $chk['amount'];
+        }
+    }
+    $payable = max(0, $total - $discount);
+    $balance = (int) ($user['Balance'] ?? 0);
+
+    if ($balance < $payable) {
+        $need = number_format($payable - $balance);
+        sendmessage($from_id, "موجودی کیف پول شما کافی نیست. کسری: <b>{$need}</b> {$cur}", null, 'html');
+        return true;
+    }
+
+    // Charge once for the whole cart, then deliver each line.
+    update("user", "Balance", $balance - $payable, "id", $from_id);
+
+    $orderIds  = [];
+    $delivered = [];
+    foreach ($data['lines'] as $l) {
+        $product = $l['product'];
+        $qty     = (int) $l['qty'];
+        // Record one order row per line (price = that line's subtotal).
+        $orderId = shop_record_order($from_id, $product, $l['subtotal'], 'paid', null);
+        $orderIds[] = $orderId;
+        // Decrement stock by the line quantity (variant-aware when set).
+        if (function_exists('product_decrement_stock')) {
+            product_decrement_stock((int) $product['id'], $qty, $l['variant']);
+        }
+        // Deliver this line qty times (serial codes/files are per-unit).
+        for ($k = 0; $k < $qty; $k++) {
+            shop_deliver_product($from_id, $product, $orderId);
+        }
+        $delivered[] = ($product['name_product'] ?? '') . " ×{$qty}";
+    }
+
+    // Record coupon usage once for the whole cart.
+    if ($couponCode !== null && $discount > 0) {
+        record_discount_use($couponCode, $from_id, $orderIds[0] ?? '', $discount);
+    }
+    // Clear coupon + empty the cart.
+    if ($couponCode !== null || (is_string($pv) && strpos($pv, 'shop_dc:') === 0)) {
+        update("user", "Processing_value", "0", "id", $from_id);
+    }
+    shop_cart_clear($from_id);
+
+    $disLine = $discount > 0 ? "\nتخفیف: " . number_format($discount) . " {$cur}" : '';
+    sendmessage(
+        $from_id,
+        "✅ پرداخت موفق بود.\nمبلغ پرداختی: <b>" . number_format($payable) . "</b> {$cur}{$disLine}\nسفارش شما ثبت شد.",
+        null,
+        'html'
+    );
+
+    // Notify admins.
+    $admins = select("admin", "id_admin", null, null, "FETCH_COLUMN");
+    if (is_array($admins)) {
+        $itemsTxt = htmlspecialchars(implode("، ", $delivered));
+        $dl = $discount > 0 ? "\nتخفیف: " . number_format($discount) . " (" . htmlspecialchars((string) $couponCode) . ")" : '';
+        foreach ($admins as $aid) {
+            sendmessage(
+                $aid,
+                "🛒 سفارش جدید (سبد چندقلمی)\nاقلام: {$itemsTxt}\nمبلغ پرداختی: " . number_format($payable) . " {$cur}{$dl}"
+                    . "\nکاربر: <code>" . htmlspecialchars((string) $from_id) . "</code>",
+                null,
+                'html'
+            );
+        }
+    }
+    return true;
+}
+
 /**
  * Central handler for the non-VPN shop callbacks. Returns true if it handled
  * the incoming callback (caller should then stop processing), false otherwise.
@@ -3342,6 +3698,77 @@ function shop_handle_callback($datain, $from_id, $user)
     // Show the shop product list.
     if ($datain === 'shoplist') {
         shop_render_list($from_id);
+        return true;
+    }
+
+    // --- Cart callbacks (سبد چندقلمی) -----------------------------------
+    if ($datain === 'cartnoop') {
+        return true; // qty badge tap — no action
+    }
+    // Add a product (optionally a variant) to the cart: cartadd_{pid} or
+    // cartadd_{pid}_{variant}. The variant segment is URL-safe (no underscores
+    // are used inside it because variant keys are stored without them here).
+    if (preg_match('/^cartadd_(\d+)(?:_(.+))?$/', $datain, $m)) {
+        $product = shop_product((int) $m[1]);
+        if (!$product) {
+            sendmessage($from_id, "محصول یافت نشد.", null, 'html');
+            return true;
+        }
+        if (!shop_product_available($product)) {
+            sendmessage($from_id, "⛔️ این محصول در حال حاضر ناموجود است.", null, 'html');
+            return true;
+        }
+        $variant = isset($m[2]) && $m[2] !== '' ? $m[2] : null;
+        shop_cart_add($from_id, (int) $m[1], $variant, 1);
+        sendmessage($from_id, "✅ به سبد خرید اضافه شد.\nتعداد اقلام سبد: <b>" . shop_cart_count($from_id) . "</b>", json_encode(['inline_keyboard' => [
+            [['text' => "🛒 مشاهدهٔ سبد", 'callback_data' => "shopcart"]],
+            [['text' => "🛍 ادامهٔ خرید", 'callback_data' => "shoplist"]],
+        ]]), 'html');
+        return true;
+    }
+    if ($datain === 'shopcart') {
+        shop_render_cart($from_id);
+        return true;
+    }
+    if (preg_match('/^cartinc_(\d+)$/', $datain, $m)) {
+        $items = shop_cart_get($from_id);
+        $idx   = (int) $m[1];
+        if (isset($items[$idx])) {
+            shop_cart_set_qty($from_id, $idx, $items[$idx]['qty'] + 1);
+        }
+        shop_render_cart($from_id);
+        return true;
+    }
+    if (preg_match('/^cartdec_(\d+)$/', $datain, $m)) {
+        $items = shop_cart_get($from_id);
+        $idx   = (int) $m[1];
+        if (isset($items[$idx])) {
+            shop_cart_set_qty($from_id, $idx, $items[$idx]['qty'] - 1);
+        }
+        shop_render_cart($from_id);
+        return true;
+    }
+    if (preg_match('/^cartdel_(\d+)$/', $datain, $m)) {
+        shop_cart_remove($from_id, (int) $m[1]);
+        shop_render_cart($from_id);
+        return true;
+    }
+    if ($datain === 'cartclear') {
+        shop_cart_clear($from_id);
+        sendmessage($from_id, "🗑 سبد خرید خالی شد.", null, 'html');
+        return true;
+    }
+    if ($datain === 'cartcoupon') {
+        if (shop_cart_count($from_id) < 1) {
+            sendmessage($from_id, "🛒 سبد خرید شما خالی است.", null, 'html');
+            return true;
+        }
+        step('shop_cart_coupon', $from_id);
+        sendmessage($from_id, "🏷 کد تخفیف خود را ارسال کنید:", null, 'html');
+        return true;
+    }
+    if ($datain === 'cartcheckout') {
+        shop_checkout_cart($from_id, $user);
         return true;
     }
 
@@ -3481,6 +3908,31 @@ function shop_handle_callback($datain, $from_id, $user)
  */
 function shop_handle_coupon_step($step, $text, $from_id, $user)
 {
+    // Cart-level coupon (applies to the whole cart total).
+    if ((string) $step === 'shop_cart_coupon') {
+        $data  = shop_cart_resolve($from_id);
+        $total = (int) $data['total'];
+        $res   = validate_discount_code(trim((string) $text), $from_id, $total);
+        if (!$res['ok']) {
+            sendmessage($from_id, "❌ " . $res['error'], null, 'html');
+            step('home', $from_id);
+            return true;
+        }
+        update("user", "Processing_value", "shop_dc:" . trim((string) $text), "id", $from_id);
+        step('home', $from_id);
+        $cur = store_currency();
+        $msg = "✅ کد تخفیف اعمال شد.\n"
+            . "جمع سبد: " . number_format($total) . " {$cur}\n"
+            . "تخفیف: " . number_format((int) $res['amount']) . " {$cur}\n"
+            . "💰 مبلغ نهایی: <b>" . number_format((int) $res['final']) . " {$cur}</b>";
+        $kb = json_encode(['inline_keyboard' => [
+            [['text' => "✅ تسویه و پرداخت", 'callback_data' => "cartcheckout"]],
+            [['text' => "🛒 مشاهدهٔ سبد", 'callback_data' => "shopcart"]],
+        ]]);
+        sendmessage($from_id, $msg, $kb, 'html');
+        return true;
+    }
+
     if (!preg_match('/^shop_coupon_(\d+)$/', (string) $step, $m)) {
         return false;
     }

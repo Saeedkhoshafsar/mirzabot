@@ -208,7 +208,7 @@ n8n فقط یک **افزونهٔ اختیاری** خواهد بود: بعداً 
 ### سفارش و پرداخت
 - [x] فاکتور/پرداخت (موجود: `Payment_report`, `api/payment.php`, `api/invoice.php`)
 - [x] کارت‌به‌کارت/درگاه/رمزارز (موجود: `card_number`, `PaySetting`)
-- [ ] سبد چندقلمی + تعداد (quantity) — استپ ۷
+- [x] سبد چندقلمی + تعداد (quantity) — استپ ۱۳ (`shop_cart_*` + ستون `user.shop_cart` + خلاصهٔ سفارش + `shop_checkout_cart`)
 - [x] وضعیت سفارش (در انتظار→پرداخت→آماده‌سازی→ارسال→تحویل→لغو→مرجوعی) — استپ ۸ب (`order_statuses()` + `set_order_status()` + `panel/orders.php`)
 - [x] **کد رهگیری پستی واقعی + شرکت ارسال + لینک رهگیری** (پست/تیپاکس/چاپار/ماهکس) — استپ ۸ب (`shipping_carriers()` + `carrier_tracking_url()` + `set_order_tracking()`)
 - [x] روش‌های ارسال چندگانه (پست/تیپاکس/پیک/حضوری) + هزینه در فاکتور — استپ ۸ب (انتخاب شرکت در `panel/orders.php`؛ هزینه در `Payment_report.shipping_cost`)
@@ -436,6 +436,15 @@ n8n فقط یک **افزونهٔ اختیاری** خواهد بود: بعداً 
     - [x] `node --check` سالم
 
   > 🎉 استپ ۱۲ (Visual Button Flow) با اتمام فاز ۹ کامل شد — همهٔ ۹ فاز انجام و merge شدند.
+
+- [x] استپ ۱۳ — سبد خرید چندقلمی + تعداد + خلاصهٔ سفارش (Multi-item Cart)  ✅ 2026-06-08
+  - [x] مدل دادهٔ سبد در ستون اختصاصی `user.shop_cart` (JSON) — کاملاً ایزوله از VPN (`Processing_value` دست‌نخورده)؛ مهاجرت non-destructive در `table.php`
+  - [x] توابع سبد در `function.php`: `shop_cart_get/save/clear/add/set_qty/remove/count` + `shop_line_unit_price` (با اختلاف قیمت واریانت) + `shop_cart_resolve` (خوددرمان: حذف ردیف محصول حذف‌شده)
+  - [x] نمایش سبد `shop_render_cart`: هر ردیف با دکمه‌های ➖/➕/🗑، جمع کل، تسویه/کد تخفیف/ادامهٔ خرید/خالی‌کردن
+  - [x] تسویهٔ چندقلمی `shop_checkout_cart`: چک موجودی همهٔ اقلام، اعمال کد تخفیف روی جمع سبد، کسر یکجای کیف‌پول، ثبت سفارش هر ردیف، کاهش موجودی (variant-aware)، تحویل به‌ازای تعداد، اطلاع ادمین
+  - [x] کال‌بک‌ها در `shop_handle_callback` (`cartadd_`/`cartinc_`/`cartdec_`/`cartdel_`/`shopcart`/`cartclear`/`cartcoupon`/`cartcheckout`) + کد تخفیف سطح سبد (`shop_cart_coupon`)
+  - [x] دکمهٔ «➕ افزودن به سبد» + «🛒 سبد خرید» در نمای محصول و لیست (با شمارندهٔ تعداد)؛ gate در `index.php` فقط روی الگوهای `cart*`/`shopcart` (رگرسیون VPN امن)
+  - [x] تست منطق سبد: ۱۰/۱۰ پاس؛ ناحیهٔ PHP `function.php`/`index.php`/`table.php` balanced
 
 ---
 
