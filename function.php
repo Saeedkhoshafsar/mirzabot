@@ -1838,6 +1838,114 @@ function set_store_terminology(array $terms, $bot_id = 0)
 }
 
 /**
+ * Registry of supported product types (generic e-commerce model).
+ * Each type declares a label and the attribute fields it uses.
+ * - 'vpn' is the legacy/default type; its data lives in the dedicated columns
+ *   (Volume_constraint, Location, inbounds, ...), so it has no extra attributes.
+ * - Other types store their extra fields in product.attributes (JSON).
+ *
+ * field: ['key' => '', 'label' => '', 'type' => text|number|textarea|bool, 'hint' => '']
+ */
+function product_types()
+{
+    return [
+        'vpn' => [
+            'label'  => 'سرویس VPN (پیش‌فرض)',
+            'fields' => [], // handled by dedicated legacy columns
+        ],
+        'physical' => [
+            'label'  => 'کالای فیزیکی',
+            'fields' => [
+                ['key' => 'stock',        'label' => 'موجودی انبار', 'type' => 'number',   'hint' => 'تعداد قابل فروش'],
+                ['key' => 'weight',       'label' => 'وزن (گرم)',     'type' => 'number',   'hint' => 'برای محاسبهٔ ارسال'],
+                ['key' => 'needs_address','label' => 'نیاز به آدرس',  'type' => 'bool',     'hint' => 'دریافت آدرس پستی هنگام خرید'],
+            ],
+        ],
+        'digital_file' => [
+            'label'  => 'فایل دیجیتال',
+            'fields' => [
+                ['key' => 'file_id',   'label' => 'شناسهٔ فایل تلگرام (file_id)', 'type' => 'text',     'hint' => 'فایل پس از خرید ارسال می‌شود'],
+                ['key' => 'file_type', 'label' => 'نوع فایل',                      'type' => 'text',     'hint' => 'document/photo/video/audio'],
+                ['key' => 'caption',   'label' => 'توضیح همراه فایل',              'type' => 'textarea', 'hint' => ''],
+            ],
+        ],
+        'serial_code' => [
+            'label'  => 'کد/سریال (لایسنس)',
+            'fields' => [
+                ['key' => 'code_format', 'label' => 'قالب نمایش کد', 'type' => 'text', 'hint' => 'مثلاً: کد شما: {code}'],
+            ],
+        ],
+        'service' => [
+            'label'  => 'خدمت/سرویس عمومی',
+            'fields' => [
+                ['key' => 'delivery_note', 'label' => 'توضیح تحویل', 'type' => 'textarea', 'hint' => 'متنی که پس از خرید نمایش داده می‌شود'],
+            ],
+        ],
+    ];
+}
+
+/** Return true if a given product type code is known. */
+function is_valid_product_type($type)
+{
+    return array_key_exists((string) $type, product_types());
+}
+
+/**
+ * Decode the attributes JSON of a product row into an array (safe).
+ * Accepts either a full product row (array) or a raw JSON string.
+ */
+function product_attributes($productOrJson)
+{
+    $raw = is_array($productOrJson) ? ($productOrJson['attributes'] ?? null) : $productOrJson;
+    if (empty($raw)) {
+        return [];
+    }
+    $decoded = json_decode($raw, true);
+    return is_array($decoded) ? $decoded : [];
+}
+
+/** Read a single attribute value from a product row/JSON, with default. */
+function product_attr($productOrJson, $key, $default = null)
+{
+    $attrs = product_attributes($productOrJson);
+    return array_key_exists($key, $attrs) ? $attrs[$key] : $default;
+}
+
+/**
+ * Persist the product_type + attributes JSON for a product row.
+ * Validates the type and keeps only fields declared for that type.
+ */
+function set_product_type($product_id, $type, array $attributes = [])
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return false;
+    }
+    if (!is_valid_product_type($type)) {
+        $type = 'vpn';
+    }
+    $types = product_types();
+    $allowed = [];
+    foreach ($types[$type]['fields'] as $f) {
+        $allowed[$f['key']] = true;
+    }
+    $clean = [];
+    foreach ($attributes as $k => $v) {
+        if (isset($allowed[$k])) {
+            $clean[$k] = $v;
+        }
+    }
+    try {
+        $json = empty($clean) ? null : json_encode($clean, JSON_UNESCAPED_UNICODE);
+        $stmt = $pdo->prepare("UPDATE product SET product_type = ?, attributes = ? WHERE id = ?");
+        return $stmt->execute([$type, $json, (int) $product_id]);
+    } catch (Exception $e) {
+        error_log("set_product_type error: " . $e->getMessage());
+        return false;
+    }
+}
+
+/**
  * Get the editable store terminology map (customer/product/service words, etc.).
  * Stored as JSON in setting.store_terminology and editable from the web panel.
  * Returns an associative array of term => label.

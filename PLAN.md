@@ -152,12 +152,13 @@ n8n فقط یک **افزونهٔ اختیاری** خواهد بود: بعداً 
   - [x] منطق ذخیره: خالی/برابر با پیش‌فرض → حذف override (تمیز)؛ غیر این → ذخیره per-bot
   - یادداشت: API جدا و JS مجزا لازم نشد چون این کدبیس الگوی صفحهٔ self-contained دارد (ساده‌تر و کم‌ریسک‌تر). اتصال خروجی ربات در استپ ۱ از طریق `keyboard.php` و `bot_label()` انجام شده.
 
-- [ ] استپ ۳ — گسترش اسکیمای محصول به مدل عمومی
-  - [ ] افزودن ستون‌های `product_type`, `attributes`(JSON), `image_main`, `stock`, `weight`, `sku` به جدول `product` (non-destructive)
-  - [ ] ساخت جدول `product_media` (id, product_id, media_type, file_path, sort)
-  - [ ] ساخت جدول `product_codes` (id, product_id, code, status, buyer_id, sold_at)
-  - [ ] افزودن مهاجرت retrofit برای نصب‌های موجود + مقداردهی پیش‌فرض `product_type='vpn'` به ردیف‌های قدیمی
-  - [ ] مستندسازی شِمای جدید در `docs/product-schema.md`
+- [x] استپ ۳ — گسترش اسکیمای محصول به مدل عمومی  ✅ 2026-06-08
+  - [x] افزودن ستون‌های `product_type` (پیش‌فرض `vpn`)، `attributes` (JSON)، `bot_id` به جدول `product` — هم در CREATE هم در مهاجرت `else` (non-destructive via `addFieldToTable`)
+  - [x] ردیف‌های قدیمی به‌صورت خودکار `product_type='vpn'` می‌گیرند → رفتار VPN بدون تغییر
+  - [x] رجیستری انواع محصول `product_types()` در `function.php` (vpn/physical/digital_file/serial_code/service) با تعریف فیلدهای هر نوع
+  - [x] توابع کمکی: `is_valid_product_type()`, `product_attributes()`, `product_attr()`, `set_product_type()`
+  - [x] مستندسازی شِمای جدید در `docs/product-model.md`
+  - یادداشت: جدول‌های `product_media` و `product_codes` در استپ‌های ۴ و ۶ ساخته می‌شوند (نزدیک‌تر به محل استفاده).
 
 - [ ] استپ ۴ — آپلود رسانهٔ محصول (تصویر/ویدیو/موسیقی) در پنل
   - [ ] ساخت دایرکتوری `uploads/products/` + `.htaccess` ایمن و افزودن به `.gitignore`
