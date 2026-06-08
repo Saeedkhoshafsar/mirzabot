@@ -114,6 +114,48 @@ function flow_state_has_await($user_id, $bot_id = null)
     }
 }
 
+/**
+ * The id of the node the user is currently parked on (or '' if none). Used by
+ * index.php to decide whether a plain-text message is a reply-keyboard tap on a
+ * flow node that must be routed to the runtime BEFORE legacy text handlers.
+ */
+function flow_state_current_node($user_id, $bot_id = null)
+{
+    global $pdo;
+    try {
+        $stmt = $pdo->prepare("SELECT current_node FROM button_flow_state WHERE bot_id = :b AND user_id = :u LIMIT 1");
+        $stmt->execute([':b' => (int) flow_bot_id($bot_id), ':u' => (string) $user_id]);
+        return (string) ($stmt->fetchColumn() ?: '');
+    } catch (Throwable $e) {
+        return '';
+    }
+}
+
+/**
+ * Does this plain-text message correspond to a reply-keyboard tap on the node
+ * the user is currently parked on? Returns true when the text exactly matches
+ * one of the current node's enabled user-children OR the back/home nav labels.
+ * Used as the index.php gate so we never hijack unrelated text — only an EXACT
+ * match against the user's own current-node buttons routes into the flow.
+ */
+function flow_reply_tap_is_for_flow($user_id, $text, $bot_id = null)
+{
+    $text = trim((string) $text);
+    if ($text === '' || !flow_is_active($bot_id)) {
+        return false;
+    }
+    $curId = flow_state_current_node($user_id, $bot_id);
+    if ($curId === '') {
+        return false;
+    }
+    $tree = get_button_flow($bot_id);
+    $cur  = flow_node($tree, $curId);
+    if (!is_array($cur)) {
+        return false;
+    }
+    return flow_match_child_by_text($tree, $cur, $text) !== null;
+}
+
 /** Wipe a user's flow state (e.g. on exit / home). */
 function flow_state_clear($user_id, $bot_id = null)
 {
@@ -806,35 +848,63 @@ function flow_runtime_menu_followup($from_id, $callback = '', $label = '')
     if (!empty($menu['disabled'])) {
         return false;
     }
-    // Gather only the admin's own, enabled child nodes.
+
+    // Does this menu button have any of the admin's own (enabled) children?
     $children = flow_children($tree, $menu['id']);
-    $rows = [];
+    $hasUserChild = false;
     foreach ($children as $child) {
-        $kind = (string) ($child['node_kind'] ?? 'user');
-        if ($kind !== 'user' || !empty($child['disabled'])) {
-            continue;
-        }
-        $clabel = (string) ($child['label'] ?? '');
-        if ($clabel === '') {
-            $clabel = '⬜';
-        }
-        $cfg = $child['config'] ?? [];
-        if (!empty($cfg['url'])) {
-            $rows[] = [['text' => $clabel, 'url' => $cfg['url']]];
-        } else {
-            $rows[] = [['text' => $clabel, 'callback_data' => 'flowgo_' . $child['id']]];
+        if ((string) ($child['node_kind'] ?? 'user') === 'user' && empty($child['disabled'])) {
+            $hasUserChild = true;
+            break;
         }
     }
-    if (empty($rows)) {
+    if (!$hasUserChild) {
         return false;
     }
-    // A short header so the extra buttons read as "more options", using the
-    // menu's own message if the admin set one, else a generic line.
+
+    // Whether to also SUPPRESS the bot's native behaviour for this button
+    // (e.g. when the admin only wants their own children to show and finds the
+    // built-in message noisy). The caller checks the return value to decide
+    // whether to `return` before legacy dispatch.
+    $suppress = !empty($menu['config']['suppress_native']);
+
+    // Park the user on the menu node so subsequent reply-keyboard taps resolve
+    // against its children (flow_match_child_by_text).
+    $state = flow_state_get($from_id);
+    $state['current_node'] = (string) $menu['id'];
+    $state['await_node']   = '';
+    $state['path']         = flow_path_ids($tree, $menu['id']);
+    flow_state_save($state);
+
+    // Render the children honouring the menu node's display_mode, reusing the
+    // same engine the rest of the flow uses (inline / reply / both).
+    $ctx = ['from_id' => $from_id];
+    $mode = flow_node_display_mode($menu);
     $header = trim((string) ($menu['config']['message'] ?? ''));
     if ($header === '') {
         $header = '➕ گزینه‌های بیشتر:';
     }
-    $kb = ['inline_keyboard' => $rows];
-    sendmessage($from_id, $header, json_encode($kb, JSON_UNESCAPED_UNICODE), 'HTML');
-    return true;
+
+    if ($mode === 'reply') {
+        $rkb = flow_runtime_reply_keyboard($tree, $menu);
+        if ($rkb !== null) {
+            sendmessage($from_id, $header, json_encode($rkb, JSON_UNESCAPED_UNICODE), 'HTML');
+        } else {
+            $kb = flow_runtime_keyboard($tree, $menu);
+            sendmessage($from_id, $header, json_encode($kb, JSON_UNESCAPED_UNICODE), 'HTML');
+        }
+    } elseif ($mode === 'both') {
+        $kb = flow_runtime_keyboard($tree, $menu);
+        sendmessage($from_id, $header, json_encode($kb, JSON_UNESCAPED_UNICODE), 'HTML');
+        $rkb = flow_runtime_reply_keyboard($tree, $menu);
+        if ($rkb !== null) {
+            sendmessage($from_id, '⌨️', json_encode($rkb, JSON_UNESCAPED_UNICODE), 'HTML');
+        }
+    } else { // 'inline' (default)
+        $kb = flow_runtime_keyboard($tree, $menu);
+        sendmessage($from_id, $header, json_encode($kb, JSON_UNESCAPED_UNICODE), 'HTML');
+    }
+
+    // Return 'suppress' so the caller stops native dispatch; true otherwise.
+    return $suppress ? 'suppress' : true;
 }

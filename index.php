@@ -409,7 +409,14 @@ if (
     && !(is_string($datain) && (strpos($datain, 'flow') === 0))
     && $text !== '/start' && $datain !== 'start'
 ) {
-    flow_runtime_menu_followup($from_id, is_string($datain) ? $datain : '', is_string($text) ? $text : '');
+    $flowFollowup = flow_runtime_menu_followup($from_id, is_string($datain) ? $datain : '', is_string($text) ? $text : '');
+    // When the admin chose «only my children / hide native message» for this
+    // menu button, the follow-up returns 'suppress' and we STOP here so the
+    // bot's built-in reply (e.g. the «اشتراک‌های خریداری‌شده…» block) is not
+    // sent. Otherwise we fall through and the native behaviour runs as usual.
+    if ($flowFollowup === 'suppress') {
+        return;
+    }
 }
 if ($text == "/start" || $datain == "start" || $text == "start") {
     sendmessage($from_id, $textbotlang['users']['text_start'], $keyboard, "html");
@@ -700,6 +707,12 @@ if ($text == "/start" || $datain == "start" || $text == "start") {
         $datain === 'flowback' || $datain === 'flowhome'
         || (is_string($datain) && preg_match('/^flowgo_/', $datain))
         || (is_string($datain) && $datain === '' && flow_state_has_await($from_id))
+        // Reply-keyboard tap on a flow node: plain text (no callback) that
+        // EXACTLY matches the current node's own children or its back/home nav.
+        // Without this, taps on a node's reply buttons (e.g. «تست 2») never
+        // reached the runtime and silently did nothing.
+        || (is_string($datain) && $datain === '' && function_exists('flow_reply_tap_is_for_flow')
+            && flow_reply_tap_is_for_flow($from_id, is_string($text) ? $text : ''))
     )
     && ($flowRes = flow_runtime_handle([
         'from_id'  => $from_id,

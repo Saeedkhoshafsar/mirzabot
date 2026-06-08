@@ -373,6 +373,7 @@
     var setDraft = props.setDraft;
     var isNew = props.isNew;
     var isSystem = !!d.system;
+    var isMenu = d.node_kind === 'system_menu';
 
     function setField(k, v) {
       var nd = Object.assign({}, d);
@@ -388,7 +389,10 @@
 
     var rows = [];
 
-    if (isSystem) {
+    if (isMenu) {
+      rows.push(h('div', { className: 'sys-warn', key: 'sw' },
+        'ℹ️ این دکمهٔ «منوی واقعی» ربات است. برچسب و رفتار اصلی آن به کد ربات وصل است و قابل تغییر نیست؛ اما می‌توانید نحوهٔ نمایش دکمه‌های فرزندی که خودتان اضافه کرده‌اید (شیشه‌ای/کشویی) و پنهان‌کردن پیام بومی را از پایین تنظیم کنید.'));
+    } else if (isSystem) {
       rows.push(h('div', { className: 'sys-warn', key: 'sw' },
         '⚠️ این یک نود سیستمی محافظت‌شده است. تغییر یا حذف آن می‌تواند رفتار ربات را خراب کند. فقط در صورت اطمینان ادامه دهید.'));
     }
@@ -416,16 +420,17 @@
       h('input', {
         key: 'label', type: 'text', value: d.label || '',
         placeholder: 'مثلاً: خرید نقدی',
+        disabled: isMenu,
         onChange: function (e) { setField('label', e.target.value); }
       }),
-      'متنی که روی دکمه به کاربر نشان داده می‌شود.'));
+      isMenu ? 'برچسب این دکمه از منوی واقعی ربات می‌آید و قابل تغییر نیست.' : 'متنی که روی دکمه به کاربر نشان داده می‌شود.'));
 
     // message text shown for most node types
     if (d.type !== 'condition') {
-      rows.push(field('پیام/توضیح (اختیاری)',
+      rows.push(field(isMenu ? 'سرتیتر بالای دکمه‌های فرزند (اختیاری)' : 'پیام/توضیح (اختیاری)',
         h('textarea', {
           key: 'msg', value: cfg.message || '',
-          placeholder: 'پیامی که هنگام رسیدن به این نود نمایش داده می‌شود…',
+          placeholder: isMenu ? 'مثلاً: گزینه‌های بیشتر… (اگر خالی بماند یک سرتیتر پیش‌فرض نمایش داده می‌شود)' : 'پیامی که هنگام رسیدن به این نود نمایش داده می‌شود…',
           onChange: function (e) { setCfg('message', e.target.value); }
         })));
     }
@@ -480,6 +485,22 @@
         h('div', { className: 'hlp' },
           'می‌توانید یکی یا هر دو را انتخاب کنید؛ اما همیشه حداقل یکی باید فعال باشد. اگر هر دو فعال باشد، دکمه‌ها هم به‌صورت شیشه‌ای و هم کشویی نمایش داده می‌شوند.')
       ));
+
+      // For REAL main-menu (system_menu) buttons: option to hide the bot's
+      // built-in reply and show ONLY the admin's own children.
+      if (d.node_kind === 'system_menu') {
+        rows.push(h('div', { className: 'grp', key: 'gsupp' },
+          h('div', { className: 'grp-t' }, 'رفتار دکمهٔ منوی واقعی'),
+          h('label', { className: 'chk' },
+            h('input', {
+              type: 'checkbox', checked: !!cfg.suppress_native,
+              onChange: function (e) { setCfg('suppress_native', e.target.checked); }
+            }),
+            'فقط فرزندان من نمایش داده شوند (پیام/رفتار بومی این دکمه پنهان شود)'),
+          h('div', { className: 'hlp' },
+            'وقتی فعال باشد، با زدن این دکمه دیگر پیام پیش‌فرض ربات (مثل «اشتراک‌های خریداری‌شده…») فرستاده نمی‌شود و فقط دکمه‌های فرزندی که خودتان اضافه کرده‌اید نمایش داده می‌شود. اگر خاموش باشد، رفتار بومی ربات مثل قبل اجرا و فرزندان شما هم بعد از آن نشان داده می‌شوند.')
+        ));
+      }
     }
 
     if (d.type === 'action') {
@@ -944,14 +965,12 @@
     var onNodeDoubleClick = useCallback(function (_evt, node) {
       var nd = node.data || {};
       var kind = nd.node_kind || (nd.system ? 'root' : 'user');
-      // Real-menu and demo nodes mirror the bot's built-in logic; their label
-      // can't be edited and they can't be deleted. The admin CAN: toggle them
-      // on/off (the switch on the node) and drag a new child from their bottom
-      // port. So we don't open the edit form for them — we explain instead.
-      if (kind === 'system_menu') {
-        alert('این دکمهٔ «منوی اصلی» ربات است.\n\n• روشن/خاموش: از کلید روی خودِ نود.\n• افزودن فرزند: از نقطهٔ پایین نود یک پیوند بکشید.\n\nبرچسب و رفتار اصلی آن قابل ویرایش نیست (به منطق ربات وصل است).');
-        return;
-      }
+      // Demo nodes mirror the bot's built-in logic and are pure read-only — no
+      // editing, no children. We explain instead of opening the form.
+      // Real-menu (system_menu) nodes: their LABEL and native behaviour stay
+      // locked (wired to the bot), BUT the admin can now edit how THEIR OWN
+      // children are presented (inline/reply/both) and whether to suppress the
+      // bot's native reply — so we DO open the (restricted) form for them.
       if (kind === 'system_demo') {
         alert('این یک نود «نمایشی» از منوی داخلی ربات است (فقط برای الگو و ذهنیت).\n\nقابل ویرایش/حذف نیست و نمی‌توان به آن فرزند افزود. اگر قابل خاموش‌کردن باشد، کلید روشن/خاموش روی آن فعال است.');
         return;
@@ -964,6 +983,12 @@
           label: nd.label || '',
           system: !!nd.system,
           node_kind: kind,
+          // Preserve system_menu metadata so the save round-trip doesn't drop
+          // the toggle/disabled/menu_key state when the admin only tweaks
+          // display_mode / suppress_native.
+          menu_key: nd.menu_key || '',
+          disabled: !!nd.disabled,
+          can_toggle: nd.can_toggle !== undefined ? !!nd.can_toggle : false,
           config: Object.assign({}, nd.config || {})
         }
       });

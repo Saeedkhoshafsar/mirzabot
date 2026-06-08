@@ -700,6 +700,11 @@ function flow_normalise_config(array $c, $type)
             $m = is_string($m) ? strtolower(trim($m)) : '';
             return in_array($m, ['inline', 'reply', 'both'], true) ? $m : 'inline';
         })($c['display_mode'] ?? 'inline'),
+        // For a REAL main-menu (system_menu) node: when true, tapping the button
+        // shows ONLY the admin's own child nodes and SUPPRESSES the bot's native
+        // reply for that button (e.g. the «اشتراک‌های خریداری‌شده…» block). Has no
+        // effect on plain user nodes. Default false → native behaviour preserved.
+        'suppress_native' => !empty($c['suppress_native']),
     ];
     // Link back to a legacy automation custom button (set during migration). Kept
     // through every normalise so the panel can sync edits/deletes to the legacy
