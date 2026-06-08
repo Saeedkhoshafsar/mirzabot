@@ -335,6 +335,11 @@ function automation_buttons($bot_id = null)
             'message' => (string) ($b['message'] ?? ''),
             'url'     => (string) ($b['url'] ?? ''),
             'active'  => !isset($b['active']) ? true : !empty($b['active']),
+            // True when this button was imported into the visual flow editor and
+            // is now managed there. The keyboard skips rendering it (to avoid a
+            // duplicate) ONLY when a flow is actually active; otherwise it shows
+            // as before, so nothing disappears if the flow is empty.
+            'flow_managed' => !empty($b['flow_managed']),
         ];
     }
     return $out;

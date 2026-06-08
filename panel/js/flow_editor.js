@@ -71,6 +71,7 @@
         id: e.id || ('e_' + e.source + '_' + e.target),
         source: e.source,
         target: e.target,
+        type: 'flowEdge',
         animated: false,
         style: { stroke: '#64748b', strokeWidth: 2 }
       };
@@ -102,6 +103,7 @@
     return {
       id: 'e_' + source + '_' + target,
       source: source, target: target,
+      type: 'flowEdge',
       animated: false, style: { stroke: '#64748b', strokeWidth: 2 }
     };
   }
@@ -125,6 +127,95 @@
     return out; // includes rootId
   }
 
+  // ---- Auto tree layout (hierarchical top-down) ----------------------------
+  // A lightweight Reingold–Tilford-ish layout so the whole tree always shows as
+  // a readable map (no dagre dependency needed). Children are placed under their
+  // parent, siblings spread horizontally, subtrees never overlap.
+  var LAYOUT = { nodeW: 180, nodeH: 90, hGap: 40, vGap: 80 };
+
+  function computeTreeLayout(rfNodes, rfEdges) {
+    if (!rfNodes.length) return {};
+    var childrenOf = {};
+    var parentOf = {};
+    rfEdges.forEach(function (e) {
+      (childrenOf[e.source] = childrenOf[e.source] || []).push(e.target);
+      parentOf[e.target] = e.source;
+    });
+    // roots = nodes without a parent (keep their on-canvas order stable)
+    var roots = rfNodes.filter(function (n) { return !parentOf[n.id]; }).map(function (n) { return n.id; });
+    if (!roots.length) roots = [rfNodes[0].id]; // safety for a cyclic mess
+
+    var pos = {};
+    var nextLeafX = 0;          // running x cursor (in "slot" units)
+    var seen = {};
+    var slotW = LAYOUT.nodeW + LAYOUT.hGap;
+    var slotH = LAYOUT.nodeH + LAYOUT.vGap;
+
+    // First pass: assign x by leaf order, y by depth (post-order so a parent is
+    // centered over its children).
+    function place(id, depth) {
+      if (seen[id]) { // cycle guard
+        pos[id] = { x: nextLeafX * slotW, y: depth * slotH };
+        nextLeafX += 1;
+        return pos[id].x;
+      }
+      seen[id] = true;
+      var kids = (childrenOf[id] || []).filter(function (k) { return !seen[k]; });
+      var x;
+      if (!kids.length) {
+        x = nextLeafX * slotW;
+        nextLeafX += 1;
+      } else {
+        var first = place(kids[0], depth + 1);
+        var last = first;
+        for (var i = 1; i < kids.length; i++) {
+          last = place(kids[i], depth + 1);
+        }
+        x = (first + last) / 2; // center parent over its children span
+      }
+      pos[id] = { x: x, y: depth * slotH };
+      return x;
+    }
+
+    var rootGap = 0;
+    roots.forEach(function (r) {
+      nextLeafX = Math.max(nextLeafX, rootGap);
+      place(r, 0);
+      rootGap = nextLeafX + 1; // separate disconnected root trees by a gap column
+    });
+
+    // Any node not reached (orphan island) gets parked in a row at the bottom.
+    var maxY = 0;
+    Object.keys(pos).forEach(function (k) { if (pos[k].y > maxY) maxY = pos[k].y; });
+    var orphanX = 0;
+    rfNodes.forEach(function (n) {
+      if (!pos[n.id]) {
+        pos[n.id] = { x: orphanX * slotW, y: maxY + slotH };
+        orphanX += 1;
+      }
+    });
+    return pos;
+  }
+
+  // Heuristic: do the stored positions look unusable (all at origin / heavily
+  // overlapping)? If so we auto-arrange on load so the admin sees a real map.
+  function positionsNeedLayout(rfNodes) {
+    if (rfNodes.length <= 1) return false;
+    var atOriginish = 0;
+    var seenKey = {};
+    var overlaps = 0;
+    rfNodes.forEach(function (n) {
+      var x = (n.position && n.position.x) || 0;
+      var y = (n.position && n.position.y) || 0;
+      if (Math.abs(x) < 1 && Math.abs(y) < 1) atOriginish += 1;
+      var key = Math.round(x / 30) + ',' + Math.round(y / 30);
+      if (seenKey[key]) overlaps += 1;
+      seenKey[key] = true;
+    });
+    // If most nodes sit on top of each other (or at 0,0), we lay out.
+    return overlaps >= Math.ceil(rfNodes.length / 2) || atOriginish >= Math.ceil(rfNodes.length / 2);
+  }
+
   // ---- Custom node renderer ------------------------------------------------
   function FlowNode(props) {
     var d = props.data || {};
@@ -139,6 +230,62 @@
   }
 
   var nodeTypes = { flowNode: FlowNode };
+
+  // ---- Custom edge with a hover/select "cut link" (🗑) button --------------
+  // Mirrors n8n / ComfyUI: hovering an edge reveals a trash button on the link
+  // so a child connection can be cut without deleting the whole node. The
+  // handler is injected via edge.data.onCut so the editor owns the state.
+  function FlowEdge(props) {
+    var sx = props.sourceX, sy = props.sourceY, tx = props.targetX, ty = props.targetY;
+    var sp = props.sourcePosition, tp = props.targetPosition;
+    var pathInfo = RF.getBezierPath({
+      sourceX: sx, sourceY: sy, sourcePosition: sp,
+      targetX: tx, targetY: ty, targetPosition: tp
+    });
+    var edgePath = pathInfo[0], labelX = pathInfo[1], labelY = pathInfo[2];
+    var data = props.data || {};
+    var hoverState = useState(false);
+    var hovered = hoverState[0], setHovered = hoverState[1];
+    var show = hovered || props.selected;
+
+    function onCutClick(e) {
+      e.stopPropagation();
+      if (data.onCut) data.onCut(props.id);
+    }
+
+    return h(React.Fragment, null,
+      // Wider invisible path to make hovering the thin line easy.
+      h('path', {
+        d: edgePath, fill: 'none', stroke: 'transparent', strokeWidth: 18,
+        style: { cursor: 'pointer' },
+        onMouseEnter: function () { setHovered(true); },
+        onMouseLeave: function () { setHovered(false); }
+      }),
+      h('path', {
+        id: props.id, className: 'react-flow__edge-path', d: edgePath, fill: 'none',
+        style: { stroke: show ? '#ef4444' : '#64748b', strokeWidth: show ? 3 : 2 }
+      }),
+      h(RF.EdgeLabelRenderer, null,
+        h('div', {
+          className: 'edge-cut' + (show ? ' show' : ''),
+          style: {
+            position: 'absolute',
+            transform: 'translate(-50%,-50%) translate(' + labelX + 'px,' + labelY + 'px)',
+            pointerEvents: 'all'
+          },
+          onMouseEnter: function () { setHovered(true); },
+          onMouseLeave: function () { setHovered(false); }
+        },
+          h('button', {
+            className: 'edge-cut-btn', title: 'قطع این پیوند (نود حذف نمی‌شود)',
+            onClick: onCutClick
+          }, '🗑')
+        )
+      )
+    );
+  }
+
+  var edgeTypes = { flowEdge: FlowEdge };
 
   // ===========================================================================
   // Side panel form (create or edit a node) — Phase 3 + Phase 4
@@ -538,6 +685,15 @@
         if (res && res.ok) {
           var rf = treeToRF(res.tree);
           metaRef.current = rf.meta;
+          // If stored positions are missing/overlapping, auto-arrange into a
+          // readable tree map so the admin always sees the full structure.
+          if (positionsNeedLayout(rf.nodes)) {
+            var pos = computeTreeLayout(rf.nodes, rf.edges);
+            rf.nodes = rf.nodes.map(function (n) {
+              var p = pos[n.id];
+              return p ? Object.assign({}, n, { position: { x: p.x, y: p.y } }) : n;
+            });
+          }
           // A fresh load resets the undo/redo timeline.
           undoStack.current = [];
           redoStack.current = [];
@@ -548,6 +704,13 @@
           setEdges(rf.edges);
           setDirty(false);
           setStatus('saved', 'ذخیره‌شده');
+          setTimeout(function () {
+            try {
+              if (rfInstance.current && rfInstance.current.fitView) {
+                rfInstance.current.fitView({ padding: 0.2, duration: 300 });
+              }
+            } catch (e) {}
+          }, 80);
         } else {
           setStatus('error', 'خطا در بارگذاری');
         }
@@ -612,6 +775,18 @@
       pushUndo(nodes, edges);
       setEdges(function (es) { return es.concat([newEdge(source, target)]); });
       markDirty();
+    }, [nodes, edges, setEdges, markDirty, pushUndo]);
+
+    // ---- cut a single edge (disconnect a child) without deleting the node ----
+    // The detached subtree stays on the canvas as an orphan island; the admin can
+    // re-link it to any parent by dragging from that parent's bottom port.
+    var cutEdge = useCallback(function (edgeId) {
+      var ed = edges.find(function (e) { return e.id === edgeId; });
+      if (!ed) return;
+      pushUndo(nodes, edges);
+      setEdges(function (es) { return es.filter(function (e) { return e.id !== edgeId; }); });
+      markDirty();
+      setStatus('dirty', 'پیوند قطع شد (نود حذف نشد)');
     }, [nodes, edges, setEdges, markDirty, pushUndo]);
 
     // ---- drag from a port and drop on empty canvas -> create child ----
@@ -747,6 +922,31 @@
       });
     }, []);
 
+    // ---- Auto-arrange the canvas into a clean top-down tree ----
+    var autoArrange = useCallback(function (opts) {
+      opts = opts || {};
+      var cur = nodes;
+      var curE = edges;
+      if (!cur.length) return;
+      var pos = computeTreeLayout(cur, curE);
+      if (!opts.silent) pushUndo(cur, curE);
+      setNodes(function (ns) {
+        return ns.map(function (n) {
+          var p = pos[n.id];
+          return p ? Object.assign({}, n, { position: { x: p.x, y: p.y } }) : n;
+        });
+      });
+      if (!opts.silent) markDirty();
+      // refit the viewport after the DOM updates
+      setTimeout(function () {
+        try {
+          if (rfInstance.current && rfInstance.current.fitView) {
+            rfInstance.current.fitView({ padding: 0.2, duration: 300 });
+          }
+        } catch (e) {}
+      }, 60);
+    }, [nodes, edges, setNodes, markDirty, pushUndo]);
+
     var save = useCallback(function () {
       var tree = rfToTree(nodes, edges, metaRef.current);
       setStatus('dirty', 'در حال ذخیره…');
@@ -774,10 +974,18 @@
         if (res && res.ok) {
           var rf = treeToRF(res.tree);
           metaRef.current = rf.meta;
+          var pos = computeTreeLayout(rf.nodes, rf.edges);
+          rf.nodes = rf.nodes.map(function (n) {
+            var p = pos[n.id];
+            return p ? Object.assign({}, n, { position: { x: p.x, y: p.y } }) : n;
+          });
           setNodes(rf.nodes);
           setEdges(rf.edges);
           markDirty();
-          alert('وارد شد. برای ذخیره، دکمه «ذخیره» را بزنید.');
+          setTimeout(function () {
+            try { if (rfInstance.current && rfInstance.current.fitView) rfInstance.current.fitView({ padding: 0.2, duration: 300 }); } catch (e) {}
+          }, 80);
+          alert('دکمه‌های قبلی به‌صورت درختی چیده شدند. برای اعمال روی ربات، دکمه «ذخیره» را بزنید.');
         } else {
           alert('خطا در وارد کردن.');
         }
@@ -825,6 +1033,7 @@
       var rb = document.getElementById('btn-reload');
       var mb = document.getElementById('btn-migrate');
       var ab = document.getElementById('btn-add');
+      var arb = document.getElementById('btn-arrange');
       var ub = document.getElementById('btn-undo');
       var rdb = document.getElementById('btn-redo');
       var hb = document.getElementById('btn-history');
@@ -836,6 +1045,7 @@
       }
       function onMigrate() { migrate(); }
       function onAdd() { addRootNode(); }
+      function onArrange() { autoArrange(); }
       function onUndo() { undo(); }
       function onRedo() { redo(); }
       function onHistory() { openHistory(); }
@@ -844,6 +1054,7 @@
       if (rb) rb.addEventListener('click', onReload);
       if (mb) mb.addEventListener('click', onMigrate);
       if (ab) ab.addEventListener('click', onAdd);
+      if (arb) arb.addEventListener('click', onArrange);
       if (ub) ub.addEventListener('click', onUndo);
       if (rdb) rdb.addEventListener('click', onRedo);
       if (hb) hb.addEventListener('click', onHistory);
@@ -853,12 +1064,13 @@
         if (rb) rb.removeEventListener('click', onReload);
         if (mb) mb.removeEventListener('click', onMigrate);
         if (ab) ab.removeEventListener('click', onAdd);
+        if (arb) arb.removeEventListener('click', onArrange);
         if (ub) ub.removeEventListener('click', onUndo);
         if (rdb) rdb.removeEventListener('click', onRedo);
         if (hb) hb.removeEventListener('click', onHistory);
         if (hc) hc.removeEventListener('click', onHistClose);
       };
-    }, [save, load, migrate, addRootNode, dirty, undo, redo, openHistory, closeHistory]);
+    }, [save, load, migrate, addRootNode, autoArrange, dirty, undo, redo, openHistory, closeHistory]);
 
     useEffect(function () {
       var sb = document.getElementById('btn-save');
@@ -962,10 +1174,18 @@
     }, [historyView, restoreVersion]);
 
     // ---- render ----
+    // Inject the cut handler into each edge's data so the custom edge can call
+    // back into the editor when its trash button is clicked.
+    var edgesWithCut = edges.map(function (e) {
+      return Object.assign({}, e, {
+        type: 'flowEdge',
+        data: Object.assign({}, e.data, { onCut: cutEdge })
+      });
+    });
     var canvas = h('div', { ref: wrapRef, style: { position: 'absolute', inset: 0 } },
       h(RF.ReactFlow, {
         nodes: nodes,
-        edges: edges,
+        edges: edgesWithCut,
         onInit: function (inst) { rfInstance.current = inst; },
         onNodesChange: handleNodesChange,
         onEdgesChange: handleEdgesChange,
@@ -974,6 +1194,9 @@
         onConnectEnd: onConnectEnd,
         onNodeDoubleClick: onNodeDoubleClick,
         nodeTypes: nodeTypes,
+        edgeTypes: edgeTypes,
+        edgesFocusable: true,
+        elementsSelectable: true,
         fitView: true,
         minZoom: 0.2,
         maxZoom: 2,

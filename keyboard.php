@@ -135,9 +135,21 @@ if ($setting['inlinebtnmain'] == "oninline" && !empty($keyboardRows)) {
         if (!function_exists('automation_buttons')) {
             require_once __DIR__ . '/automation.php';
         }
+        // When a visual flow is active, buttons imported into it (flow_managed)
+        // are surfaced by the flow runtime instead, so we skip them here to avoid
+        // showing each one twice. Buttons never imported still render normally.
+        // keyboard.php is included before flow.php in index.php, so load it here
+        // on demand to make flow_is_active() available.
+        if (!function_exists('flow_is_active') && is_file(__DIR__ . '/flow.php')) {
+            require_once __DIR__ . '/flow.php';
+        }
+        $flowActive = function_exists('flow_is_active') ? flow_is_active() : false;
         foreach (automation_buttons() as $cb) {
             if (!$cb['active'] || $cb['label'] === '') {
                 continue;
+            }
+            if ($flowActive && !empty($cb['flow_managed'])) {
+                continue; // managed by the visual flow -> avoid duplicate
             }
             if ($cb['url'] !== '' && $cb['event'] === '' && $cb['message'] === '') {
                 // Pure link button.
@@ -174,9 +186,18 @@ if ($setting['inlinebtnmain'] == "oninline" && !empty($keyboardRows)) {
         if (!function_exists('automation_buttons')) {
             require_once __DIR__ . '/automation.php';
         }
+        // Skip flow-managed buttons while a visual flow is active (the flow
+        // runtime renders them), so they don't appear twice. See inline branch.
+        if (!function_exists('flow_is_active') && is_file(__DIR__ . '/flow.php')) {
+            require_once __DIR__ . '/flow.php';
+        }
+        $flowActive = function_exists('flow_is_active') ? flow_is_active() : false;
         foreach (automation_buttons() as $cb) {
             if (!$cb['active'] || $cb['label'] === '') {
                 continue;
+            }
+            if ($flowActive && !empty($cb['flow_managed'])) {
+                continue; // managed by the visual flow -> avoid duplicate
             }
             $keyboardcustom[] = [['text' => $cb['label']]];
         }
