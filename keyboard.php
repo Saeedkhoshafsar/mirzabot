@@ -45,6 +45,25 @@ $replacements = [
 ];
 $admin_idss = select("admin", "*", "id_admin", $from_id, "count");
 $temp_addtional_key = [];
+// Mode-aware main keyboard: when the panel runs a non-VPN profile (shop / digital
+// / …) but the stored layout is still an untouched factory default (the historic
+// VPN layout that ships with the bot), swap it to the leaner store layout so the
+// bot stops offering VPN-only buttons (free test account, luck wheel, extend).
+// An admin-customised layout is never touched. Applied here so it takes effect on
+// the very first message, not only after the next update cycle.
+if (
+    function_exists('panel_mode') && function_exists('keyboard_is_factory_default')
+    && function_exists('default_main_keyboard_json')
+) {
+    $__pmode = panel_mode();
+    if ($__pmode !== 'vpn' && keyboard_is_factory_default($setting['keyboardmain'] ?? '')) {
+        $__newkb = default_main_keyboard_json($__pmode);
+        if (($setting['keyboardmain'] ?? '') !== $__newkb) {
+            update("setting", "keyboardmain", $__newkb, null, null);
+            $setting['keyboardmain'] = $__newkb;
+        }
+    }
+}
 $keyboardLayout = json_decode($setting['keyboardmain'], true);
 $keyboardRows = [];
 if (is_array($keyboardLayout) && isset($keyboardLayout['keyboard']) && is_array($keyboardLayout['keyboard'])) {

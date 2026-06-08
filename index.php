@@ -38,9 +38,29 @@ $first_name = sanitizeUserName($first_name);
 $setting = select("setting", "*");
 $ManagePanel = new ManagePanel();
 $keyboard_check = json_decode($setting['keyboardmain'], true);
-if (is_array($keyboard_check) && preg_match('/[\x{600}-\x{6FF}\x{FB50}-\x{FDFF}]/u', $keyboard_check['keyboard'][0][0]['text'])) {
-    $keyboardmain = '{"keyboard":[[{"text":"text_sell"},{"text":"text_extend"}],[{"text":"text_usertest"},{"text":"text_wheel_luck"}],[{"text":"text_Purchased_services"},{"text":"accountwallet"}],[{"text":"text_affiliates"},{"text":"text_Tariff_list"}],[{"text":"text_support"},{"text":"text_help"}]]}';
-    update("setting", "keyboardmain", $keyboardmain, null, null);
+// 1) Safety: if the main keyboard somehow got saved with already-resolved
+//    Persian text instead of template keys, reset it to the factory default for
+//    the ACTIVE panel mode so callbacks keep working.
+$kb_resolved_persian = is_array($keyboard_check)
+    && preg_match('/[\x{600}-\x{6FF}\x{FB50}-\x{FDFF}]/u', $keyboard_check['keyboard'][0][0]['text'] ?? '');
+// 2) Mode-aware swap: when running a non-VPN profile (shop / digital / …) but the
+//    stored layout is still an untouched factory default (the old VPN layout that
+//    ships with the bot), switch it to the leaner store layout so the bot stops
+//    showing VPN-only buttons (free test account, luck wheel, extend). We NEVER
+//    overwrite a layout the admin customised themselves.
+$want_mode = function_exists('panel_mode') ? panel_mode() : 'vpn';
+$kb_mode_mismatch = function_exists('keyboard_is_factory_default')
+    && $want_mode !== 'vpn'
+    && keyboard_is_factory_default($setting['keyboardmain'] ?? '');
+if ($kb_resolved_persian || $kb_mode_mismatch) {
+    $keyboardmain = function_exists('default_main_keyboard_json')
+        ? default_main_keyboard_json($want_mode)
+        : '{"keyboard":[[{"text":"text_sell"},{"text":"text_extend"}],[{"text":"text_usertest"},{"text":"text_wheel_luck"}],[{"text":"text_Purchased_services"},{"text":"accountwallet"}],[{"text":"text_affiliates"},{"text":"text_Tariff_list"}],[{"text":"text_support"},{"text":"text_help"}]]}';
+    // Avoid a redundant write if keyboard.php already performed the swap.
+    if (($setting['keyboardmain'] ?? '') !== $keyboardmain) {
+        update("setting", "keyboardmain", $keyboardmain, null, null);
+        $setting['keyboardmain'] = $keyboardmain;
+    }
 }
 
 #-----------telegram_ip_ranges------------#

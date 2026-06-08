@@ -66,11 +66,30 @@ if (isset($_GET['writetest'])) {
 
 // 4) Main keyboard -------------------------------------------------------------
 echo "\n--- setting.keyboardmain (bot main menu) ---\n";
+$km = null;
 try {
     $km = $pdo->query("SELECT keyboardmain FROM setting LIMIT 1")->fetchColumn();
     echo $km . "\n";
 } catch (Throwable $e) {
     echo "read error: " . $e->getMessage() . "\n";
+}
+
+// 4b) Mode-aware keyboard swap diagnostics ------------------------------------
+echo "\n--- keyboard mode swap (issue 5) ---\n";
+$pmode = function_exists('panel_mode') ? panel_mode() : 'vpn';
+echo "active mode               : $pmode\n";
+if (function_exists('keyboard_is_factory_default')) {
+    $isFactory = keyboard_is_factory_default($km ?? '');
+    echo "stored layout is factory  : " . var_export($isFactory, true) . "\n";
+    $willSwap = ($pmode !== 'vpn' && $isFactory);
+    echo "will auto-swap on next msg : " . var_export($willSwap, true) . "\n";
+    if (function_exists('default_main_keyboard_json')) {
+        echo "target layout for '$pmode' :\n" . default_main_keyboard_json($pmode) . "\n";
+    }
+    echo ">>> After you message the bot once, the stored layout above should\n";
+    echo ">>> change to the target layout and the VPN-only buttons disappear.\n";
+} else {
+    echo "keyboard_is_factory_default() not available (deploy not updated yet)\n";
 }
 
 // 5) Does a setting row even exist? -------------------------------------------
