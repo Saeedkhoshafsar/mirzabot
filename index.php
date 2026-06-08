@@ -611,9 +611,16 @@ if ($text == "/start" || $datain == "start" || $text == "start") {
     update("user", "Processing_value", $usernameconfig, "id", $from_id);
     sendmessage($from_id, $textbotlang['textbot']['selectLocation'], $list_marzban_panel_user, 'html');
     step('getdata', $from_id);
+} elseif (preg_match('/^shop_coupon_\d+$/', (string) ($user['step'] ?? '')) && shop_handle_coupon_step($user['step'], $text, $from_id, $user)) {
+    // User is typing a coupon code for a shop product.
+    return;
+} elseif ($datain === 'shoporders' || $text === '/myorders') {
+    // Customer's own shop orders + tracking codes — isolated from the VPN flow.
+    shop_render_my_orders($from_id);
+    return;
 } elseif (
     $datain === 'shoplist' || $text === '/shop'
-    || preg_match('/^shop(view|buy)_\d+$/', $datain)
+    || preg_match('/^shop(view|buy|coupon)_\d+$/', $datain)
 ) {
     // Generic (non-VPN) shop purchase path — fully isolated from the VPN flow.
     $shopData = ($text === '/shop') ? 'shoplist' : $datain;

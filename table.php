@@ -983,8 +983,43 @@ try {
             echo "The usefirst discount field was added ✅";
         }
     }
+    // Professional coupon columns (non-destructive). Legacy rows keep working:
+    //  - discount_kind defaults to 'percent' (existing behaviour: price = percent)
+    //  - the rest are optional constraints used by validate_discount_code().
+    addFieldToTable("DiscountSell", "discount_kind", "percent", "varchar(20)");
+    addFieldToTable("DiscountSell", "max_amount", "0", "varchar(60)");   // cap for percent discounts (0 = no cap)
+    addFieldToTable("DiscountSell", "min_order", "0", "varchar(60)");    // minimum cart amount
+    addFieldToTable("DiscountSell", "start_at", null, "varchar(60)");    // unix ts (optional)
+    addFieldToTable("DiscountSell", "enabled", "1", "varchar(10)");
+    addFieldToTable("DiscountSell", "bot_id", "0", "INT(11)");
 } catch (Exception $e) {
     file_put_contents('error_log', $e->getMessage());
+}
+//-----------------------------------------------------------------
+// discount_usage: precise per-use log of shop coupons (who/when/how much).
+// Powers per-user limits and the usage report. Independent of the legacy
+// Giftcodeconsumed table (which the VPN flow keeps using).
+try {
+    $result = $connect->query("SHOW TABLES LIKE 'discount_usage'");
+    $table_exists = ($result->num_rows > 0);
+    if (!$table_exists) {
+        $result = $connect->query("CREATE TABLE discount_usage (
+        id INT(11) UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        code varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+        user_id varchar(200) NULL,
+        order_id varchar(2000) NULL,
+        amount varchar(60) NULL,
+        bot_id INT(11) NOT NULL DEFAULT 0,
+        used_at TIMESTAMP NULL DEFAULT NULL,
+        KEY idx_code (code),
+        KEY idx_user (code, user_id))
+        ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci");
+        if (!$result) {
+            echo "table discount_usage" . mysqli_error($connect);
+        }
+    }
+} catch (Exception $e) {
+    file_put_contents('error_log discount_usage', $e->getMessage());
 }
 //-----------------------------------------------------------------
 try {

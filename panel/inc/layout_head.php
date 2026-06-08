@@ -135,6 +135,16 @@ $initials = mb_strtoupper(mb_substr($currentUser, 0, 1, 'UTF-8'), 'UTF-8');
             <span class="nav-icon"><?= icon('edit') ?></span><span
               class="nav-label">برندینگ و اصطلاحات</span>
           </a>
+          <a href="discounts.php" class="nav-item <?= $activeNav === 'discounts' ? 'active' : '' ?>"
+            title="کدهای تخفیف">
+            <span class="nav-icon"><?= icon('card') ?></span><span
+              class="nav-label">کدهای تخفیف</span>
+          </a>
+          <a href="orders.php" class="nav-item <?= $activeNav === 'orders' ? 'active' : '' ?>"
+            title="سفارش‌ها و کد رهگیری">
+            <span class="nav-icon"><?= icon('invoice') ?></span><span
+              class="nav-label">سفارش‌ها</span>
+          </a>
         </div>
         <div class="nav-section">
           <div class="nav-heading"><?= $textbotlang['panel']['layoutSidebarToggleLabel'] ?></div>

@@ -125,11 +125,11 @@ n8n فقط یک **افزونهٔ اختیاری** خواهد بود: بعداً 
 4. **کد/سریال محصول (Serial / License codes):**
    جدول `product_codes` (product_id, code, status=available|sold, buyer_id, sold_at). هنگام خرید نوع `serial_code`، یک کد آزاد به کاربر تحویل داده می‌شود.
 
-5. **تخفیف و کد تخفیف (Discounts / Coupons):**
-   روی زیرساخت موجود (`DiscountSell`, `Discount`, `Giftcodeconsumed`). گسترش برای تخفیف درصدی/مبلغی، ساخت دسته‌ای کد، سقف per-user، بازهٔ زمانی، scope محصول/دسته، و جدول `discount_usage`.
+5. ✅ **تخفیف و کد تخفیف (Discounts / Coupons):**
+   روی زیرساخت موجود (`DiscountSell`, `Discount`, `Giftcodeconsumed`). گسترش برای تخفیف درصدی/مبلغی، ساخت دسته‌ای کد، سقف per-user، بازهٔ زمانی، scope محصول/دسته، و جدول `discount_usage`. **انجام شد**: `validate_discount_code()`، `generate_discount_codes()`، `record_discount_use()`، `panel/discounts.php`، جریان کد تخفیف در ربات.
 
-6. **سفارش و ردگیری (Orders & Tracking):**
-   روی `Payment_report` موجود (که نقش سفارش/فاکتور دارد). افزودن وضعیت سفارش (در انتظار/پرداخت‌شده/در حال آماده‌سازی/ارسال‌شده/تحویل‌شده/لغو)، **کد رهگیری پستی** (tracking_code + شرکت ارسال)، روش ارسال انتخابی، و اطلاع‌رسانی تغییر وضعیت به کاربر در ربات.
+6. ✅ **سفارش و ردگیری (Orders & Tracking):**
+   روی `Payment_report` موجود. وضعیت سفارش، **کد رهگیری پستی واقعی** (پست/تیپاکس/چاپار/ماهکس + لینک رهگیری)، و اطلاع‌رسانی خودکار به کاربر. **انجام شد**: `order_statuses()`، `shipping_carriers()`، `set_order_status()`، `set_order_tracking()`، `notify_order_update()`، `panel/orders.php`، «سفارش‌های من» در ربات.
 
 7. **آدرس و اطلاعات مشتری (Customer / Address):**
    جدول `customer_address` (user_id, bot_id, full_name, phone, province, city, postal_code, address, is_default). برای محصولات فیزیکی هنگام خرید آدرس گرفته/انتخاب می‌شود.
@@ -192,32 +192,32 @@ n8n فقط یک **افزونهٔ اختیاری** خواهد بود: بعداً 
 - [ ] محصول ناموجود/پیش‌فروش — استپ ۸ج
 
 ### قیمت و تخفیف
-- [ ] تخفیف درصدی/مبلغی — استپ ۸
-- [ ] کد تخفیف + ساخت دسته‌ای + سقف per-user + بازهٔ زمانی + scope — استپ ۸
-- [ ] حداقل مبلغ سفارش / سقف تخفیف — استپ ۸
+- [x] تخفیف درصدی/مبلغی — استپ ۸ (`discount_kind` percent/fixed در `DiscountSell`)
+- [x] کد تخفیف + ساخت دسته‌ای + سقف per-user + بازهٔ زمانی + scope — استپ ۸ (`panel/discounts.php` + `generate_discount_codes()` + `discount_usage`)
+- [x] حداقل مبلغ سفارش / سقف تخفیف — استپ ۸ (`min_order` / `max_amount`)
 - [x] کد شارژ کیف‌پول (موجود: `Discount`) — حفظ می‌شود
 
 ### سفارش و پرداخت
 - [x] فاکتور/پرداخت (موجود: `Payment_report`, `api/payment.php`, `api/invoice.php`)
 - [x] کارت‌به‌کارت/درگاه/رمزارز (موجود: `card_number`, `PaySetting`)
 - [ ] سبد چندقلمی + تعداد (quantity) — استپ ۷
-- [ ] وضعیت سفارش (در انتظار→پرداخت→آماده‌سازی→ارسال→تحویل→لغو→مرجوعی) — استپ ۸ب
-- [ ] **کد رهگیری پستی واقعی + شرکت ارسال + لینک رهگیری** (مثلا لینک رهگیری پست: tracking.post.ir) — استپ ۸ب
-- [ ] روش‌های ارسال چندگانه (پست/تیپاکس/پیک/حضوری) + هزینه در فاکتور — استپ ۵ب (تعریف)، ۷/۸ب (اعمال)
-- [ ] «سفارش‌های من» در ربات + اطلاع‌رسانی تغییر وضعیت — استپ ۸ب
+- [x] وضعیت سفارش (در انتظار→پرداخت→آماده‌سازی→ارسال→تحویل→لغو→مرجوعی) — استپ ۸ب (`order_statuses()` + `set_order_status()` + `panel/orders.php`)
+- [x] **کد رهگیری پستی واقعی + شرکت ارسال + لینک رهگیری** (پست/تیپاکس/چاپار/ماهکس) — استپ ۸ب (`shipping_carriers()` + `carrier_tracking_url()` + `set_order_tracking()`)
+- [x] روش‌های ارسال چندگانه (پست/تیپاکس/پیک/حضوری) + هزینه در فاکتور — استپ ۸ب (انتخاب شرکت در `panel/orders.php`؛ هزینه در `Payment_report.shipping_cost`)
+- [x] «سفارش‌های من» در ربات + اطلاع‌رسانی تغییر وضعیت — استپ ۸ب (`shop_render_my_orders()` + `notify_order_update()`)
 
 ### مشتری
 - [x] کیف‌پول/موجودی کاربر (موجود: `Balance`)
 - [x] شمارهٔ موبایل + احراز هویت (موجود: `number`, request_contact, اعتبارسنجی ایران)
 - [x] نام دلخواه / ثبت‌نام (موجود: `namecustom`, `register`, `verify`)
 - [ ] آدرس‌های پستی ساختاریافته: گیرنده، موبایل، استان، شهر، کدپستی، آدرس (چند آدرس + پیش‌فرض) — استپ ۸ج
-- [ ] تاریخچهٔ خرید کاربر — استپ ۸ب (سفارش‌های من)
+- [x] تاریخچهٔ خرید کاربر — استپ ۸ب (`user_orders()` / «سفارش‌های من» در ربات)
 
 ### بازاریابی و رشد
 - [x] همکاری در فروش / زیرمجموعه‌گیری (موجود: `affiliates`, `codeInvitation`, `affiliatescount`)
 - [x] گردونهٔ شانس (موجود: `wheel_list`)
 - [x] کش‌بک (موجود: `chashbackextend` در shopSetting)
-- [ ] کد تخفیف + ساخت دسته‌ای — استپ ۸
+- [x] کد تخفیف + ساخت دسته‌ای — استپ ۸ (`panel/discounts.php`)
 
 ### مدیریت و گزارش (پنل)
 - [x] داشبورد/آمار (موجود: `panel/` + `api/statbot.php`)

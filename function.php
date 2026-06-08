@@ -2553,6 +2553,10 @@ function shop_render_product($from_id, $product)
             'text' => "🛒 خرید",
             'callback_data' => "shopbuy_" . (int) $product['id'],
         ]];
+        $kb['inline_keyboard'][] = [[
+            'text' => "🏷 کد تخفیف",
+            'callback_data' => "shopcoupon_" . (int) $product['id'],
+        ]];
     }
     $kb['inline_keyboard'][] = [[
         'text' => "🔙 بازگشت",
@@ -2652,6 +2656,212 @@ function shop_record_order($from_id, $product, $price, $status = 'paid')
     return $orderId;
 }
 
+// ===========================================================================
+// Discounts / coupons (step 8) — built on the existing DiscountSell table.
+// ===========================================================================
+
+/**
+ * Count how many times a user has already used a coupon code (shop path).
+ */
+function discount_user_uses($code, $user_id)
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return 0;
+    }
+    try {
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM discount_usage WHERE code = ? AND user_id = ?");
+        $stmt->execute([(string) $code, (string) $user_id]);
+        return (int) $stmt->fetchColumn();
+    } catch (Exception $e) {
+        error_log("discount_user_uses error: " . $e->getMessage());
+        return 0;
+    }
+}
+
+/**
+ * Validate a shop coupon code against a cart amount and user, and compute the
+ * discount. Returns:
+ *   ['ok' => true,  'amount' => int, 'final' => int, 'row' => array]
+ *   ['ok' => false, 'error'  => string]   (human-readable Persian reason)
+ *
+ * Reuses DiscountSell semantics:
+ *   price          = discount value (percent OR fixed, per discount_kind)
+ *   discount_kind  = 'percent' (default/legacy) | 'fixed'
+ *   max_amount     = cap for percent discounts (0 = no cap)
+ *   min_order      = minimum cart amount required
+ *   limitDiscount / usedDiscount = global usage cap
+ *   useuser        = per-user cap (counted in discount_usage)
+ *   time           = expiry unix ts (0 = never); start_at = optional start ts
+ *   enabled        = '1' to be usable
+ */
+function validate_discount_code($code, $user_id, $cart_amount, $bot_id = null)
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return ['ok' => false, 'error' => 'خطای داخلی.'];
+    }
+    if ($bot_id === null) {
+        $bot_id = defined('BOT_ID') ? (int) BOT_ID : 0;
+    }
+    $code = trim((string) $code);
+    if ($code === '') {
+        return ['ok' => false, 'error' => 'کد تخفیف خالی است.'];
+    }
+    try {
+        $stmt = $pdo->prepare(
+            "SELECT * FROM DiscountSell
+             WHERE codeDiscount = ? AND (bot_id = ? OR bot_id = 0)
+             ORDER BY id DESC LIMIT 1"
+        );
+        $stmt->execute([$code, (int) $bot_id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    } catch (Exception $e) {
+        error_log("validate_discount_code error: " . $e->getMessage());
+        return ['ok' => false, 'error' => 'خطای داخلی.'];
+    }
+
+    if (!$row) {
+        return ['ok' => false, 'error' => 'کد تخفیف نامعتبر است.'];
+    }
+    if (isset($row['enabled']) && $row['enabled'] !== null && (string) $row['enabled'] === '0') {
+        return ['ok' => false, 'error' => 'این کد تخفیف غیرفعال است.'];
+    }
+    $now = time();
+    if (!empty($row['start_at']) && $now < (int) $row['start_at']) {
+        return ['ok' => false, 'error' => 'این کد هنوز فعال نشده است.'];
+    }
+    if (!empty($row['time']) && (int) $row['time'] !== 0 && $now >= (int) $row['time']) {
+        return ['ok' => false, 'error' => 'این کد تخفیف منقضی شده است.'];
+    }
+    if ((int) ($row['limitDiscount'] ?? 0) !== 0
+        && (int) ($row['usedDiscount'] ?? 0) >= (int) $row['limitDiscount']) {
+        return ['ok' => false, 'error' => 'ظرفیت استفاده از این کد به پایان رسیده است.'];
+    }
+    $perUser = (int) ($row['useuser'] ?? 0);
+    if ($perUser > 0 && discount_user_uses($code, $user_id) >= $perUser) {
+        return ['ok' => false, 'error' => 'سقف استفادهٔ شما از این کد پر شده است.'];
+    }
+    $minOrder = (int) ($row['min_order'] ?? 0);
+    if ($minOrder > 0 && (int) $cart_amount < $minOrder) {
+        return ['ok' => false, 'error' => 'حداقل مبلغ سفارش برای این کد ' . number_format($minOrder) . ' است.'];
+    }
+
+    // Compute discount.
+    $kind  = $row['discount_kind'] ?? 'percent';
+    $value = (float) ($row['price'] ?? 0);
+    if ($kind === 'fixed') {
+        $amount = (int) round($value);
+    } else { // percent (default / legacy)
+        $amount = (int) round(($value / 100) * (int) $cart_amount);
+        $cap = (int) ($row['max_amount'] ?? 0);
+        if ($cap > 0 && $amount > $cap) {
+            $amount = $cap;
+        }
+    }
+    if ($amount < 0) {
+        $amount = 0;
+    }
+    if ($amount > (int) $cart_amount) {
+        $amount = (int) $cart_amount; // never below zero final
+    }
+    $final = (int) $cart_amount - $amount;
+
+    return ['ok' => true, 'amount' => $amount, 'final' => $final, 'row' => $row];
+}
+
+/**
+ * Record a coupon use: increments DiscountSell.usedDiscount and logs to
+ * discount_usage (for per-user limits and reporting).
+ */
+function record_discount_use($code, $user_id, $order_id, $amount, $bot_id = null)
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return;
+    }
+    if ($bot_id === null) {
+        $bot_id = defined('BOT_ID') ? (int) BOT_ID : 0;
+    }
+    try {
+        $pdo->prepare("UPDATE DiscountSell SET usedDiscount = usedDiscount + 1 WHERE codeDiscount = ?")
+            ->execute([(string) $code]);
+        $pdo->prepare(
+            "INSERT INTO discount_usage (code, user_id, order_id, amount, bot_id, used_at)
+             VALUES (?,?,?,?,?,NOW())"
+        )->execute([(string) $code, (string) $user_id, (string) $order_id, (string) $amount, (int) $bot_id]);
+    } catch (Exception $e) {
+        error_log("record_discount_use error: " . $e->getMessage());
+    }
+}
+
+/**
+ * Batch-generate N unique coupon codes sharing the same settings.
+ * $opts: price, discount_kind, limitDiscount, useuser, min_order, max_amount,
+ *        time (expiry ts), prefix, length, bot_id.
+ * Returns ['created' => int, 'codes' => [...]].
+ */
+function generate_discount_codes($count, array $opts)
+{
+    global $pdo;
+    $res = ['created' => 0, 'codes' => []];
+    if (!isset($pdo) || $count < 1) {
+        return $res;
+    }
+    $count   = min((int) $count, 1000); // safety cap
+    $prefix  = preg_replace('/[^A-Za-z0-9_-]/', '', (string) ($opts['prefix'] ?? ''));
+    $length  = max(4, min(16, (int) ($opts['length'] ?? 6)));
+    $bot_id  = (int) ($opts['bot_id'] ?? (defined('BOT_ID') ? BOT_ID : 0));
+
+    try {
+        $ins = $pdo->prepare(
+            "INSERT INTO DiscountSell
+             (codeDiscount, price, limitDiscount, agent, usefirst, useuser, code_product,
+              code_panel, time, type, usedDiscount, discount_kind, max_amount, min_order,
+              start_at, enabled, bot_id)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+        );
+        $made = 0;
+        $attempts = 0;
+        while ($made < $count && $attempts < $count * 20) {
+            $attempts++;
+            $rand = strtoupper(bin2hex(random_bytes(8)));
+            $code = ($prefix !== '' ? $prefix . '-' : '') . substr($rand, 0, $length);
+            // Skip if exists.
+            $chk = $pdo->prepare("SELECT 1 FROM DiscountSell WHERE codeDiscount = ? LIMIT 1");
+            $chk->execute([$code]);
+            if ($chk->fetchColumn()) {
+                continue;
+            }
+            $ins->execute([
+                $code,
+                (string) ($opts['price'] ?? '0'),
+                (string) ($opts['limitDiscount'] ?? '1'),
+                (string) ($opts['agent'] ?? 'allusers'),
+                (string) ($opts['usefirst'] ?? '0'),
+                (string) ($opts['useuser'] ?? '1'),
+                (string) ($opts['code_product'] ?? 'all'),
+                (string) ($opts['code_panel'] ?? '/all'),
+                (string) ($opts['time'] ?? '0'),
+                (string) ($opts['type'] ?? 'all'),
+                '0',
+                (string) ($opts['discount_kind'] ?? 'percent'),
+                (string) ($opts['max_amount'] ?? '0'),
+                (string) ($opts['min_order'] ?? '0'),
+                isset($opts['start_at']) && $opts['start_at'] !== '' ? (string) $opts['start_at'] : null,
+                '1',
+                $bot_id,
+            ]);
+            $res['codes'][] = $code;
+            $made++;
+        }
+        $res['created'] = $made;
+    } catch (Exception $e) {
+        error_log("generate_discount_codes error: " . $e->getMessage());
+    }
+    return $res;
+}
+
 /**
  * Central handler for the non-VPN shop callbacks. Returns true if it handled
  * the incoming callback (caller should then stop processing), false otherwise.
@@ -2676,7 +2886,19 @@ function shop_handle_callback($datain, $from_id, $user)
         return true;
     }
 
-    // Buy a product.
+    // Ask for a coupon code for a product.
+    if (preg_match('/^shopcoupon_(\d+)$/', $datain, $m)) {
+        $product = shop_product((int) $m[1]);
+        if (!$product) {
+            sendmessage($from_id, "محصول یافت نشد.", null, 'html');
+            return true;
+        }
+        step('shop_coupon_' . (int) $m[1], $from_id);
+        sendmessage($from_id, "🏷 کد تخفیف خود را ارسال کنید:", null, 'html');
+        return true;
+    }
+
+    // Buy a product (optionally with an applied coupon stored in Processing_value).
     if (preg_match('/^shopbuy_(\d+)$/', $datain, $m)) {
         $product = shop_product((int) $m[1]);
         if (!$product) {
@@ -2689,8 +2911,23 @@ function shop_handle_callback($datain, $from_id, $user)
         }
         $price   = (int) preg_replace('/[^\d]/', '', (string) ($product['price_product'] ?? '0'));
         $balance = (int) ($user['Balance'] ?? 0);
-        if ($balance < $price) {
-            $need = number_format($price - $balance);
+
+        // Re-validate any applied coupon at purchase time (stored as shop_dc:{code}).
+        $couponCode = null;
+        $discount   = 0;
+        $pv = $user['Processing_value'] ?? '';
+        if (is_string($pv) && strpos($pv, 'shop_dc:') === 0) {
+            $maybe = substr($pv, strlen('shop_dc:'));
+            $chk = validate_discount_code($maybe, $from_id, $price);
+            if ($chk['ok']) {
+                $couponCode = $maybe;
+                $discount   = (int) $chk['amount'];
+            }
+        }
+        $payable = max(0, $price - $discount);
+
+        if ($balance < $payable) {
+            $need = number_format($payable - $balance);
             sendmessage(
                 $from_id,
                 "موجودی کیف پول شما کافی نیست. کسری: <b>{$need}</b> " . store_currency(),
@@ -2700,24 +2937,34 @@ function shop_handle_callback($datain, $from_id, $user)
             return true;
         }
         // Deduct balance, record order, deliver.
-        $newBalance = $balance - $price;
+        $newBalance = $balance - $payable;
         update("user", "Balance", $newBalance, "id", $from_id);
-        $orderId = shop_record_order($from_id, $product, $price, 'paid');
+        $orderId = shop_record_order($from_id, $product, $payable, 'paid');
         $status  = shop_deliver_product($from_id, $product, $orderId);
 
-        // If a serial code couldn't be delivered, refund to keep things fair.
+        // If a serial code/file couldn't be delivered, refund to keep things fair.
         if ($status === 'serial_code:none' || $status === 'digital_file:missing') {
             update("user", "Balance", $balance, "id", $from_id);
             return true;
+        }
+        // Record coupon usage (after successful delivery).
+        if ($couponCode !== null && $discount > 0) {
+            record_discount_use($couponCode, $from_id, $orderId, $discount);
+        }
+        // Clear any applied coupon.
+        if ($couponCode !== null || (is_string($pv) && strpos($pv, 'shop_dc:') === 0)) {
+            update("user", "Processing_value", "0", "id", $from_id);
         }
         // Notify admins of the new shop order.
         $admins = select("admin", "id_admin", null, null, "FETCH_COLUMN");
         if (is_array($admins)) {
             $name = htmlspecialchars($product['name_product'] ?? '');
+            $disLine = $discount > 0 ? "\nتخفیف: " . number_format($discount) . " (" . htmlspecialchars((string) $couponCode) . ")" : '';
             foreach ($admins as $aid) {
                 sendmessage(
                     $aid,
-                    "🛒 سفارش جدید\nمحصول: {$name}\nمبلغ: " . number_format($price) . " " . store_currency()
+                    "🛒 سفارش جدید\nمحصول: {$name}\nمبلغ پرداختی: " . number_format($payable) . " " . store_currency()
+                        . $disLine
                         . "\nکاربر: <code>" . htmlspecialchars((string) $from_id) . "</code>\nسفارش: <code>{$orderId}</code>",
                     null,
                     'html'
@@ -2728,6 +2975,305 @@ function shop_handle_callback($datain, $from_id, $user)
     }
 
     return false;
+}
+
+/**
+ * Handle the "enter coupon code" text step in the shop flow.
+ * Called from index.php when user.step matches shop_coupon_{id}.
+ * Returns true if handled.
+ */
+function shop_handle_coupon_step($step, $text, $from_id, $user)
+{
+    if (!preg_match('/^shop_coupon_(\d+)$/', (string) $step, $m)) {
+        return false;
+    }
+    $product = shop_product((int) $m[1]);
+    if (!$product) {
+        sendmessage($from_id, "محصول یافت نشد.", null, 'html');
+        step('home', $from_id);
+        return true;
+    }
+    $price = (int) preg_replace('/[^\d]/', '', (string) ($product['price_product'] ?? '0'));
+    $res = validate_discount_code(trim((string) $text), $from_id, $price);
+    if (!$res['ok']) {
+        sendmessage($from_id, "❌ " . $res['error'], null, 'html');
+        step('home', $from_id);
+        return true;
+    }
+    // Store the applied coupon and show a confirm-buy with the new total.
+    update("user", "Processing_value", "shop_dc:" . trim((string) $text), "id", $from_id);
+    step('home', $from_id);
+    $cur = store_currency();
+    $msg = "✅ کد تخفیف اعمال شد.\n"
+        . "قیمت: " . number_format($price) . " {$cur}\n"
+        . "تخفیف: " . number_format((int) $res['amount']) . " {$cur}\n"
+        . "💰 مبلغ نهایی: <b>" . number_format((int) $res['final']) . " {$cur}</b>";
+    $kb = json_encode(['inline_keyboard' => [
+        [['text' => "🛒 تأیید و خرید", 'callback_data' => "shopbuy_" . (int) $product['id']]],
+        [['text' => "🔙 بازگشت", 'callback_data' => "backuser"]],
+    ]]);
+    sendmessage($from_id, $msg, $kb, 'html');
+    return true;
+}
+
+// ===========================================================================
+// Orders & shipping tracking (step 8b) — built on the extended Payment_report.
+// ===========================================================================
+
+/**
+ * Registry of shipping carriers with a tracking-link template.
+ * {code} in `track` is replaced with the tracking code. Admins can pick a
+ * carrier when shipping a physical order; the customer gets a clickable link.
+ */
+function shipping_carriers()
+{
+    return [
+        'post' => [
+            'name'  => 'پست جمهوری اسلامی ایران',
+            'track' => 'https://tracking.post.ir/?id={code}',
+        ],
+        'tipax' => [
+            'name'  => 'تیپاکس',
+            'track' => 'https://tipaxco.com/tracking?code={code}',
+        ],
+        'chapar' => [
+            'name'  => 'چاپار',
+            'track' => 'https://chaparexp.com/tracking?code={code}',
+        ],
+        'mahex' => [
+            'name'  => 'ماهکس',
+            'track' => 'https://mahex.com/tracking?code={code}',
+        ],
+        'snapp' => [
+            'name'  => 'اسنپ‌باکس',
+            'track' => '',
+        ],
+        'other' => [
+            'name'  => 'سایر / حضوری',
+            'track' => '',
+        ],
+    ];
+}
+
+/**
+ * Build a tracking URL for a carrier code, or '' if not supported.
+ */
+function carrier_tracking_url($carrier, $code)
+{
+    $code = trim((string) $code);
+    if ($code === '') {
+        return '';
+    }
+    $carriers = shipping_carriers();
+    $tpl = $carriers[$carrier]['track'] ?? '';
+    if ($tpl === '') {
+        return '';
+    }
+    return str_replace('{code}', rawurlencode($code), $tpl);
+}
+
+/**
+ * Order status registry: machine value => Persian label + emoji.
+ * Used by both the panel dropdown and customer notifications.
+ */
+function order_statuses()
+{
+    return [
+        'pending'    => '⏳ در انتظار بررسی',
+        'paid'       => '💳 پرداخت شد',
+        'processing' => '📦 در حال آماده‌سازی',
+        'shipped'    => '🚚 ارسال شد',
+        'delivered'  => '✅ تحویل شد',
+        'canceled'   => '❌ لغو شد',
+        'refunded'   => '↩️ مسترد شد',
+    ];
+}
+
+/**
+ * Human-readable label for an order status (falls back to the raw value).
+ */
+function order_status_label($status)
+{
+    $map = order_statuses();
+    $status = (string) $status;
+    return $map[$status] ?? ($status !== '' ? $status : '—');
+}
+
+/**
+ * Update an order's status (Payment_report.order_status) by order id.
+ * Returns true on success.
+ */
+function set_order_status($order_id, $status)
+{
+    global $connect;
+    try {
+        $stmt = $connect->prepare(
+            "UPDATE Payment_report SET order_status = ?, at_updated = ? WHERE id_order = ?"
+        );
+        return $stmt->execute([(string) $status, date('Y-m-d H:i:s'), (string) $order_id]);
+    } catch (Exception $e) {
+        error_log("set_order_status error: " . $e->getMessage());
+        return false;
+    }
+}
+
+/**
+ * Attach shipping/tracking info to an order. Optionally bumps status to shipped.
+ * Returns true on success.
+ */
+function set_order_tracking($order_id, $carrier, $tracking_code, $bump_shipped = true)
+{
+    global $connect;
+    $carriers = shipping_carriers();
+    $carrierName = $carriers[$carrier]['name'] ?? (string) $carrier;
+    try {
+        if ($bump_shipped) {
+            $stmt = $connect->prepare(
+                "UPDATE Payment_report
+                 SET shipping_carrier = ?, carrier_name = ?, tracking_code = ?,
+                     order_status = 'shipped', at_updated = ?
+                 WHERE id_order = ?"
+            );
+            return $stmt->execute([
+                (string) $carrier, $carrierName, (string) $tracking_code,
+                date('Y-m-d H:i:s'), (string) $order_id,
+            ]);
+        }
+        $stmt = $connect->prepare(
+            "UPDATE Payment_report
+             SET shipping_carrier = ?, carrier_name = ?, tracking_code = ?, at_updated = ?
+             WHERE id_order = ?"
+        );
+        return $stmt->execute([
+            (string) $carrier, $carrierName, (string) $tracking_code,
+            date('Y-m-d H:i:s'), (string) $order_id,
+        ]);
+    } catch (Exception $e) {
+        error_log("set_order_tracking error: " . $e->getMessage());
+        return false;
+    }
+}
+
+/**
+ * Fetch a single order row by its order id.
+ */
+function get_order($order_id)
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return null;
+    }
+    try {
+        $stmt = $pdo->prepare("SELECT * FROM Payment_report WHERE id_order = ? LIMIT 1");
+        $stmt->execute([(string) $order_id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row ?: null;
+    } catch (Exception $e) {
+        error_log("get_order error: " . $e->getMessage());
+        return null;
+    }
+}
+
+/**
+ * Notify the customer when their order status/tracking changes.
+ * Sends a clear Persian message including a tracking link when available.
+ */
+function notify_order_update($order_id, $extra_note = '')
+{
+    $order = get_order($order_id);
+    if (!$order) {
+        return false;
+    }
+    $userId = $order['id_user'] ?? null;
+    if (!$userId) {
+        return false;
+    }
+    $statusLabel = order_status_label($order['order_status'] ?? '');
+    $msg = "🔔 بروزرسانی سفارش\n"
+        . "کد سفارش: <code>" . htmlspecialchars((string) $order_id) . "</code>\n"
+        . "وضعیت: <b>{$statusLabel}</b>";
+
+    $carrier = $order['shipping_carrier'] ?? '';
+    $code    = $order['tracking_code'] ?? '';
+    if ($code !== null && trim((string) $code) !== '') {
+        $carrierName = $order['carrier_name'] ?? '';
+        $msg .= "\n\n📦 اطلاعات ارسال";
+        if ($carrierName !== '') {
+            $msg .= "\nشرکت: " . htmlspecialchars((string) $carrierName);
+        }
+        $msg .= "\nکد رهگیری: <code>" . htmlspecialchars((string) $code) . "</code>";
+        $url = carrier_tracking_url($carrier, $code);
+        if ($url !== '') {
+            $msg .= "\n🔗 پیگیری مرسوله: " . $url;
+        }
+    }
+    if (trim((string) $extra_note) !== '') {
+        $msg .= "\n\n📝 " . htmlspecialchars((string) $extra_note);
+    }
+    sendmessage($userId, $msg, null, 'html');
+    return true;
+}
+
+/**
+ * List a user's shop orders (newest first) for the "my orders" bot view.
+ */
+function user_orders($user_id, $limit = 20)
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return [];
+    }
+    try {
+        $stmt = $pdo->prepare(
+            "SELECT * FROM Payment_report
+             WHERE id_user = ? AND product_id IS NOT NULL AND order_status IS NOT NULL
+             ORDER BY id DESC LIMIT ?"
+        );
+        $stmt->bindValue(1, (string) $user_id);
+        $stmt->bindValue(2, (int) $limit, PDO::PARAM_INT);
+        $stmt->execute();
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    } catch (Exception $e) {
+        error_log("user_orders error: " . $e->getMessage());
+        return [];
+    }
+}
+
+/**
+ * Render the "my orders" list to a Telegram user.
+ * Returns true (handled).
+ */
+function shop_render_my_orders($from_id)
+{
+    $orders = user_orders($from_id, 20);
+    if (empty($orders)) {
+        sendmessage($from_id, "شما هنوز سفارشی ثبت نکرده‌اید.", null, 'html');
+        return true;
+    }
+    $cur = store_currency();
+    $msg = "🧾 <b>سفارش‌های شما</b>\n";
+    foreach ($orders as $o) {
+        $pname = '';
+        if (!empty($o['product_id'])) {
+            $p = shop_product((int) $o['product_id']);
+            $pname = $p['name_product'] ?? ('#' . $o['product_id']);
+        }
+        $msg .= "\n────────────\n"
+            . "کد: <code>" . htmlspecialchars((string) $o['id_order']) . "</code>\n"
+            . ($pname !== '' ? "محصول: " . htmlspecialchars((string) $pname) . "\n" : '')
+            . "مبلغ: " . number_format((int) $o['price']) . " {$cur}\n"
+            . "وضعیت: " . order_status_label($o['order_status'] ?? '') . "\n";
+        $code = $o['tracking_code'] ?? '';
+        if ($code !== null && trim((string) $code) !== '') {
+            $msg .= "کد رهگیری: <code>" . htmlspecialchars((string) $code) . "</code>\n";
+            $url = carrier_tracking_url($o['shipping_carrier'] ?? '', $code);
+            if ($url !== '') {
+                $msg .= "🔗 پیگیری: " . $url . "\n";
+            }
+        }
+    }
+    sendmessage($from_id, $msg, null, 'html');
+    return true;
 }
 
 function generateAuthStr($length = 10)
