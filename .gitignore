@@ -24,3 +24,8 @@ Thumbs.db
 *.swp
 .idea/
 .vscode/
+
+# ── Uploaded product media (keep dir & .htaccess, ignore actual uploads) ──
+/uploads/products/*
+!/uploads/products/.htaccess
+!/uploads/products/index.html

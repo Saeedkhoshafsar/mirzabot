@@ -573,6 +573,31 @@ try {
 }
 //-----------------------------------------------------------------
 try {
+    $result = $connect->query("SHOW TABLES LIKE 'product_media'");
+    $table_exists = ($result->num_rows > 0);
+    if (!$table_exists) {
+        $result = $connect->query("CREATE TABLE product_media (
+        id INT(11) UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        product_id INT(11) NOT NULL,
+        media_type varchar(20) NOT NULL DEFAULT 'image',
+        file_path varchar(500) NOT NULL,
+        telegram_file_id varchar(255) NULL,
+        sort INT(11) NOT NULL DEFAULT 0,
+        created_at TIMESTAMP NULL DEFAULT NULL,
+        KEY idx_product (product_id))
+        ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci");
+        if (!$result) {
+            echo "table product_media" . mysqli_error($connect);
+        }
+    } else {
+        addFieldToTable("product_media", "telegram_file_id", null, "varchar(255)");
+        addFieldToTable("product_media", "sort", "0", "INT(11) NOT NULL DEFAULT 0");
+    }
+} catch (Exception $e) {
+    file_put_contents('error_log product_media', $e->getMessage());
+}
+//-----------------------------------------------------------------
+try {
 
     $result = $connect->query("SHOW TABLES LIKE 'invoice'");
     $table_exists = ($result->num_rows > 0);

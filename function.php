@@ -1946,6 +1946,105 @@ function set_product_type($product_id, $type, array $attributes = [])
 }
 
 /**
+ * List media rows for a product, ordered by sort then id.
+ */
+function product_media_list($product_id)
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return [];
+    }
+    try {
+        $stmt = $pdo->prepare("SELECT * FROM product_media WHERE product_id = ? ORDER BY sort ASC, id ASC");
+        $stmt->execute([(int) $product_id]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    } catch (Exception $e) {
+        return [];
+    }
+}
+
+/**
+ * Add a media record for a product.
+ * $media_type: image|video|audio|document
+ */
+function product_media_add($product_id, $file_path, $media_type = 'image', $telegram_file_id = null)
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return false;
+    }
+    try {
+        $sort = (int) ($pdo->query("SELECT COALESCE(MAX(sort),0)+1 FROM product_media WHERE product_id = " . (int) $product_id)->fetchColumn());
+        $stmt = $pdo->prepare("INSERT INTO product_media (product_id, media_type, file_path, telegram_file_id, sort, created_at) VALUES (?, ?, ?, ?, ?, NOW())");
+        return $stmt->execute([(int) $product_id, $media_type, $file_path, $telegram_file_id, $sort]);
+    } catch (Exception $e) {
+        error_log("product_media_add error: " . $e->getMessage());
+        return false;
+    }
+}
+
+/**
+ * Delete a media record (and its file on disk) by id.
+ */
+function product_media_delete($id)
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return false;
+    }
+    try {
+        $row = null;
+        $stmt = $pdo->prepare("SELECT file_path FROM product_media WHERE id = ?");
+        $stmt->execute([(int) $id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        $del = $pdo->prepare("DELETE FROM product_media WHERE id = ?");
+        $ok = $del->execute([(int) $id]);
+        if ($ok && $row && !empty($row['file_path'])) {
+            // file_path is stored relative to project root (e.g. uploads/products/xx.jpg)
+            $abs = __DIR__ . '/' . ltrim($row['file_path'], '/');
+            if (is_file($abs)) {
+                @unlink($abs);
+            }
+        }
+        return $ok;
+    } catch (Exception $e) {
+        error_log("product_media_delete error: " . $e->getMessage());
+        return false;
+    }
+}
+
+/**
+ * Detect a safe media type + extension for an uploaded file (by MIME).
+ * Returns [media_type, ext] or null if not allowed.
+ */
+function product_media_detect($tmpPath, $originalName = '')
+{
+    $allowed = [
+        'image/jpeg' => ['image', 'jpg'],
+        'image/png'  => ['image', 'png'],
+        'image/webp' => ['image', 'webp'],
+        'image/gif'  => ['image', 'gif'],
+        'video/mp4'  => ['video', 'mp4'],
+        'video/webm' => ['video', 'webm'],
+        'audio/mpeg' => ['audio', 'mp3'],
+        'audio/ogg'  => ['audio', 'ogg'],
+        'audio/wav'  => ['audio', 'wav'],
+    ];
+    $mime = null;
+    if (function_exists('finfo_open')) {
+        $f = finfo_open(FILEINFO_MIME_TYPE);
+        $mime = finfo_file($f, $tmpPath);
+        finfo_close($f);
+    } elseif (function_exists('mime_content_type')) {
+        $mime = mime_content_type($tmpPath);
+    }
+    if ($mime !== null && isset($allowed[$mime])) {
+        return $allowed[$mime];
+    }
+    return null;
+}
+
+/**
  * Get the editable store terminology map (customer/product/service words, etc.).
  * Stored as JSON in setting.store_terminology and editable from the web panel.
  * Returns an associative array of term => label.

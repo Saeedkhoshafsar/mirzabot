@@ -137,6 +137,10 @@ include __DIR__ . '/inc/layout_head.php';
                     onclick="openEditModal(<?= htmlspecialchars(json_encode($p), ENT_QUOTES) ?>)">
                     <?= icon('edit', 13) ?>
                   </button>
+                  <a href="product_media.php?pid=<?= (int) $p['id'] ?>" class="btn btn-ghost btn-sm btn-icon"
+                    title="رسانهٔ محصول">
+                    <?= icon('eye', 13) ?>
+                  </a>
                   <a href="product.php?delete=<?= (int) $p['id'] ?>&_csrf=<?= csrf_token() ?>"
                     class="btn btn-no btn-sm btn-icon" title=$textbotlang['panel']['productDeleteBtn']
                     data-confirm=sprintf($textbotlang['panel']['productConfirmDeleteProduct'], $p['name_product'])>
