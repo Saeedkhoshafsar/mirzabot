@@ -1844,7 +1844,10 @@ function set_store_terminology(array $terms, $bot_id = 0)
  *   (Volume_constraint, Location, inbounds, ...), so it has no extra attributes.
  * - Other types store their extra fields in product.attributes (JSON).
  *
- * field: ['key' => '', 'label' => '', 'type' => text|number|textarea|bool, 'hint' => '']
+ * Simple field: ['key','label','type'=>text|number|textarea|bool|select,'hint','options'?]
+ * Repeater field (table of rows):
+ *   ['key','label','type'=>'repeater','hint','columns'=>[ ['key','label','type'], ... ]]
+ *   The value is stored as an array of associative rows in attributes JSON.
  */
 function product_types()
 {
@@ -1856,17 +1859,46 @@ function product_types()
         'physical' => [
             'label'  => 'کالای فیزیکی',
             'fields' => [
-                ['key' => 'stock',        'label' => 'موجودی انبار', 'type' => 'number',   'hint' => 'تعداد قابل فروش'],
-                ['key' => 'weight',       'label' => 'وزن (گرم)',     'type' => 'number',   'hint' => 'برای محاسبهٔ ارسال'],
-                ['key' => 'needs_address','label' => 'نیاز به آدرس',  'type' => 'bool',     'hint' => 'دریافت آدرس پستی هنگام خرید'],
+                ['key' => 'brand',         'label' => 'برند', 'type' => 'text', 'hint' => 'اختیاری'],
+                ['key' => 'sku',           'label' => 'کد انبار (SKU)', 'type' => 'text', 'hint' => 'اختیاری'],
+                ['key' => 'warranty',      'label' => 'گارانتی', 'type' => 'text', 'hint' => 'مثلاً: ۱۸ ماه'],
+                ['key' => 'stock',         'label' => 'موجودی کل (اگر واریانت ندارد)', 'type' => 'number', 'hint' => 'اگر از واریانت‌ها استفاده می‌کنید، خالی بگذارید'],
+                ['key' => 'weight',        'label' => 'وزن (گرم)', 'type' => 'number', 'hint' => 'برای محاسبهٔ هزینهٔ ارسال'],
+                ['key' => 'needs_address', 'label' => 'نیاز به آدرس پستی', 'type' => 'bool', 'hint' => 'دریافت آدرس هنگام خرید'],
+                // Variants: each color/size combination has its own stock & price diff.
+                ['key' => 'variants', 'label' => 'تنوع محصول (رنگ/سایز)', 'type' => 'repeater',
+                 'hint' => 'برای هر رنگ/سایز یک ردیف بسازید؛ موجودی و قیمت هرکدام مستقل است.',
+                 'columns' => [
+                    ['key' => 'color',      'label' => 'رنگ',           'type' => 'text'],
+                    ['key' => 'size',       'label' => 'سایز',          'type' => 'text'],
+                    ['key' => 'sku',        'label' => 'کد (SKU)',       'type' => 'text'],
+                    ['key' => 'stock',      'label' => 'موجودی',         'type' => 'number'],
+                    ['key' => 'price_diff', 'label' => 'اختلاف قیمت (+/−)', 'type' => 'number'],
+                 ],
+                ],
+                // Shipping methods: post / tipax / courier / pickup, each with cost & ETA.
+                ['key' => 'shipping_methods', 'label' => 'روش‌های ارسال', 'type' => 'repeater',
+                 'hint' => 'مثلاً پست پیشتاز، تیپاکس، پیک، تحویل حضوری — هزینه و زمان هرکدام جداگانه.',
+                 'columns' => [
+                    ['key' => 'name',  'label' => 'نام روش (پست/تیپاکس/پیک)', 'type' => 'text'],
+                    ['key' => 'price', 'label' => 'هزینهٔ ارسال', 'type' => 'number'],
+                    ['key' => 'days',  'label' => 'زمان تقریبی (روز)', 'type' => 'text'],
+                 ],
+                ],
             ],
         ],
         'digital_file' => [
             'label'  => 'فایل دیجیتال',
             'fields' => [
                 ['key' => 'file_id',   'label' => 'شناسهٔ فایل تلگرام (file_id)', 'type' => 'text',     'hint' => 'فایل پس از خرید ارسال می‌شود'],
-                ['key' => 'file_type', 'label' => 'نوع فایل',                      'type' => 'text',     'hint' => 'document/photo/video/audio'],
-                ['key' => 'caption',   'label' => 'توضیح همراه فایل',              'type' => 'textarea', 'hint' => ''],
+                ['key' => 'file_type', 'label' => 'نوع فایل', 'type' => 'select', 'hint' => '',
+                 'options' => [
+                    'document' => 'سند/فایل (document)',
+                    'photo'    => 'تصویر (photo)',
+                    'video'    => 'ویدیو (video)',
+                    'audio'    => 'صوت (audio)',
+                 ]],
+                ['key' => 'caption',   'label' => 'توضیح همراه فایل', 'type' => 'textarea', 'hint' => ''],
             ],
         ],
         'serial_code' => [
@@ -1925,13 +1957,76 @@ function set_product_type($product_id, $type, array $attributes = [])
         $type = 'vpn';
     }
     $types = product_types();
-    $allowed = [];
+    // Index declared fields by key so we can sanitize per field type.
+    $fieldDefs = [];
     foreach ($types[$type]['fields'] as $f) {
-        $allowed[$f['key']] = true;
+        $fieldDefs[$f['key']] = $f;
     }
     $clean = [];
     foreach ($attributes as $k => $v) {
-        if (isset($allowed[$k])) {
+        if (!isset($fieldDefs[$k])) {
+            continue; // unknown field for this type → drop
+        }
+        $def = $fieldDefs[$k];
+        $ftype = $def['type'] ?? 'text';
+
+        if ($ftype === 'repeater') {
+            // Expect an array of rows; keep only declared columns, drop empty rows.
+            if (!is_array($v)) {
+                continue;
+            }
+            $colKeys = [];
+            foreach (($def['columns'] ?? []) as $c) {
+                $colKeys[$c['key']] = true;
+            }
+            $rows = [];
+            foreach ($v as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $cleanRow = [];
+                $hasValue = false;
+                foreach ($row as $ck => $cv) {
+                    if (!isset($colKeys[$ck])) {
+                        continue;
+                    }
+                    $cv = is_string($cv) ? trim($cv) : $cv;
+                    $cleanRow[$ck] = $cv;
+                    if ($cv !== '' && $cv !== null) {
+                        $hasValue = true;
+                    }
+                }
+                if ($hasValue) {
+                    $rows[] = $cleanRow;
+                }
+            }
+            if (!empty($rows)) {
+                $clean[$k] = array_values($rows);
+            }
+            continue;
+        }
+
+        if ($ftype === 'bool') {
+            // Normalize checkbox-style values to 1/0.
+            $clean[$k] = ($v === '1' || $v === 1 || $v === true || $v === 'on') ? 1 : 0;
+            continue;
+        }
+
+        if ($ftype === 'select') {
+            // Keep only values present in declared options.
+            $opts = $def['options'] ?? [];
+            if (array_key_exists((string) $v, $opts)) {
+                $clean[$k] = $v;
+            }
+            continue;
+        }
+
+        // text / number / textarea → store as trimmed scalar (skip empty).
+        if (is_array($v)) {
+            continue;
+        }
+        $v = is_string($v) ? trim($v) : $v;
+        if ($v !== '' && $v !== null) {
             $clean[$k] = $v;
         }
     }

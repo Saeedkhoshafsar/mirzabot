@@ -312,6 +312,19 @@ include __DIR__ . '/inc/layout_head.php';
   </div>
 </div>
 
+<style>
+  .field-hint { color: var(--mute); font-size: 12px; margin-top: 4px; }
+  .rep-field .rep-wrap { overflow-x: auto; border: 1px solid var(--bd); border-radius: 10px; }
+  .rep-field .rep-table { width: 100%; border-collapse: collapse; min-width: 420px; }
+  .rep-field .rep-table th,
+  .rep-field .rep-table td { padding: 6px; border-bottom: 1px solid var(--bd); text-align: right; font-size: 13px; }
+  .rep-field .rep-table th { color: var(--mute); font-weight: 600; white-space: nowrap; }
+  .rep-field .rep-table tr:last-child td { border-bottom: none; }
+  .rep-field .rep-table .input { padding: 6px 8px; }
+  .rep-field .rep-actions { width: 38px; text-align: center; }
+  .rep-field .rep-del { padding: 2px 10px; line-height: 1; font-size: 16px; }
+  .rep-field .rep-add { margin-top: 8px; }
+</style>
 <script>
   // Product types + their attribute field definitions (from product_types()).
   window.PRODUCT_TYPES = <?= json_encode(product_types(), JSON_UNESCAPED_UNICODE) ?>;
