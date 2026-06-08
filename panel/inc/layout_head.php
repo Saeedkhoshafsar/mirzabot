@@ -130,6 +130,11 @@ $initials = mb_strtoupper(mb_substr($currentUser, 0, 1, 'UTF-8'), 'UTF-8');
               <?= icon('settings') ?>
             </span><span class="nav-label"><?= $textbotlang['panel']['layoutThemeToggleLabel'] ?></span>
           </a>
+          <a href="labels.php" class="nav-item <?= $activeNav === 'labels' ? 'active' : '' ?>"
+            title="برندینگ و اصطلاحات">
+            <span class="nav-icon"><?= icon('edit') ?></span><span
+              class="nav-label">برندینگ و اصطلاحات</span>
+          </a>
         </div>
         <div class="nav-section">
           <div class="nav-heading"><?= $textbotlang['panel']['layoutSidebarToggleLabel'] ?></div>

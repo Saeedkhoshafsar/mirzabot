@@ -1764,6 +1764,80 @@ function bot_label($key, $lang = null, $default = null, $bot_id = null)
 }
 
 /**
+ * Get the default (language-file) value for a label key, ignoring DB overrides.
+ * Used by the panel to show "original" text next to the editable field.
+ */
+function bot_label_default($key, $lang = 'fa')
+{
+    $langData = languagechange(null, $lang);
+    if (isset($langData['textbot'][$key]) && is_string($langData['textbot'][$key])) {
+        return $langData['textbot'][$key];
+    }
+    return '';
+}
+
+/**
+ * Create/update/delete a per-bot label override in the `botlabels` table.
+ * - $value === null or '' deletes the override (falls back to language file).
+ * - $bot_id = 0 means the main bot; >0 a child bot (botsaz.id).
+ */
+function set_bot_label($key, $lang, $value, $bot_id = 0)
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return false;
+    }
+    $bot_id = (int) $bot_id;
+    try {
+        if ($value === null || trim($value) === '') {
+            $stmt = $pdo->prepare("DELETE FROM botlabels WHERE bot_id = ? AND label_key = ? AND lang = ?");
+            return $stmt->execute([$bot_id, $key, $lang]);
+        }
+        $stmt = $pdo->prepare(
+            "INSERT INTO botlabels (bot_id, label_key, lang, label_value, updated_at)
+             VALUES (?, ?, ?, ?, NOW())
+             ON DUPLICATE KEY UPDATE label_value = VALUES(label_value), updated_at = NOW()"
+        );
+        return $stmt->execute([$bot_id, $key, $lang, $value]);
+    } catch (Exception $e) {
+        error_log("set_bot_label error: " . $e->getMessage());
+        return false;
+    }
+}
+
+/**
+ * Save the store terminology map (JSON) for the main bot or a child bot.
+ * Main bot -> setting.store_terminology ; child bot -> botsaz.setting JSON key.
+ */
+function set_store_terminology(array $terms, $bot_id = 0)
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return false;
+    }
+    $bot_id = (int) $bot_id;
+    try {
+        if ($bot_id > 0) {
+            $stmt = $pdo->prepare("SELECT setting FROM botsaz WHERE id = ? LIMIT 1");
+            $stmt->execute([$bot_id]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            $set = ($row && !empty($row['setting'])) ? json_decode($row['setting'], true) : [];
+            if (!is_array($set)) {
+                $set = [];
+            }
+            $set['store_terminology'] = $terms;
+            $up = $pdo->prepare("UPDATE botsaz SET setting = ? WHERE id = ?");
+            return $up->execute([json_encode($set, JSON_UNESCAPED_UNICODE), $bot_id]);
+        }
+        $up = $pdo->prepare("UPDATE setting SET store_terminology = ?");
+        return $up->execute([json_encode($terms, JSON_UNESCAPED_UNICODE)]);
+    } catch (Exception $e) {
+        error_log("set_store_terminology error: " . $e->getMessage());
+        return false;
+    }
+}
+
+/**
  * Get the editable store terminology map (customer/product/service words, etc.).
  * Stored as JSON in setting.store_terminology and editable from the web panel.
  * Returns an associative array of term => label.
