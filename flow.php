@@ -283,6 +283,13 @@ function set_button_flow(array $tree, $bot_id = null, $note = '', $created_by = 
         // 3) Trim history.
         flow_trim_history($bot_id);
 
+        // 4) Reconcile legacy custom buttons with the flow (so edits/deletes the
+        //    admin made to imported buttons in the visual editor actually take
+        //    effect on the bot's keyboard). Best-effort, never blocks the save.
+        if ($ok) {
+            flow_sync_legacy_buttons($tree, $bot_id);
+        }
+
         return ['ok' => (bool) $ok, 'error' => null, 'tree' => $tree];
     } catch (Exception $e) {
         error_log("set_button_flow error: " . $e->getMessage());
@@ -419,6 +426,12 @@ function flow_normalise_config(array $c, $type)
         'auto_back'     => !empty($c['auto_back']),
         'auto_home'     => !empty($c['auto_home']),
     ];
+    // Link back to a legacy automation custom button (set during migration). Kept
+    // through every normalise so the panel can sync edits/deletes to the legacy
+    // button list on save. Empty for native flow nodes.
+    if (!empty($c['legacy_id'])) {
+        $out['legacy_id'] = (string) $c['legacy_id'];
+    }
     if (!empty($out['url']) && !preg_match('~^https?://~i', $out['url'])) {
         $out['url'] = '';
     }
@@ -982,6 +995,16 @@ function flow_build_from_legacy($bot_id = null)
     foreach ($legacy as $b) {
         $id = 'n_' . substr(md5($b['id'] . microtime() . $b['label']), 0, 8);
         $type = ($b['url'] !== '' && $b['message'] === '' && $b['event'] === '') ? 'button' : 'message';
+        $cfg = flow_normalise_config([
+            'message'   => $b['message'],
+            'url'       => $b['url'],
+            'auto_back' => true,
+            'auto_home' => true,
+        ], $type);
+        // Remember which legacy custom button this node mirrors, so edits/deletes
+        // made in the visual editor can be written back to automation_config on
+        // save (otherwise the bot would keep showing the old legacy button).
+        $cfg['legacy_id'] = (string) $b['id'];
         $tree['nodes'][] = [
             'id'       => $id,
             'type'     => $type,
@@ -989,12 +1012,7 @@ function flow_build_from_legacy($bot_id = null)
             'parent'   => 'n_root',
             'system'   => false,
             'position' => ['x' => $x, 'y' => $y],
-            'config'   => flow_normalise_config([
-                'message'   => $b['message'],
-                'url'       => $b['url'],
-                'auto_back' => true,
-                'auto_home' => true,
-            ], $type),
+            'config'   => $cfg,
         ];
         $tree['edges'][] = [
             'id'     => 'e_root_' . $id,
@@ -1003,7 +1021,130 @@ function flow_build_from_legacy($bot_id = null)
         ];
         $y += 90;
     }
+
+    // Mark the imported legacy buttons as "flow_managed" right away, so that if
+    // the admin deletes one of these nodes and saves, the sync step knows the
+    // legacy button was imported and should be removed (not left orphaned in the
+    // bot keyboard). Best-effort; never blocks migration.
+    if (!empty($legacy)
+        && function_exists('get_automation_config')
+        && function_exists('set_automation_config')) {
+        try {
+            $cfg = get_automation_config($bot_id);
+            if (is_array($cfg['buttons'] ?? null)) {
+                $dirty = false;
+                foreach ($cfg['buttons'] as $i => $b) {
+                    if (is_array($b) && empty($b['flow_managed'])) {
+                        $cfg['buttons'][$i]['flow_managed'] = true;
+                        $dirty = true;
+                    }
+                }
+                if ($dirty) {
+                    set_automation_config($cfg, $bot_id);
+                }
+            }
+        } catch (Throwable $e) {
+            error_log('flow_build_from_legacy mark error: ' . $e->getMessage());
+        }
+    }
+
     return flow_normalise_tree($tree);
+}
+
+/**
+ * Reconcile the legacy automation custom buttons (automation_config['buttons'])
+ * with the visual flow tree, using the per-node config['legacy_id'] link that
+ * migration sets.
+ *
+ * WHY: the bot's reply/inline keyboard is built from automation_config buttons
+ * (keyboard.php), while the visual editor edits the flow tree. After a user
+ * imports legacy buttons and then edits/deletes them in the editor, the bot
+ * must reflect those changes. This function pushes the flow's view of each
+ * mirrored button back into automation_config:
+ *   - node still present  -> update the legacy button's label/message/url.
+ *   - node deleted         -> remove that legacy button.
+ * Native flow nodes (no legacy_id) are ignored here; they live only in the flow
+ * and are surfaced by the flow runtime, not the legacy keyboard.
+ *
+ * Safe & best-effort: never throws; does nothing if automation helpers are
+ * unavailable or no buttons are mirrored.
+ */
+function flow_sync_legacy_buttons(array $tree, $bot_id = null)
+{
+    if (!function_exists('get_automation_config') || !function_exists('set_automation_config')) {
+        if (is_file(__DIR__ . '/automation.php')) {
+            require_once __DIR__ . '/automation.php';
+        }
+    }
+    if (!function_exists('get_automation_config') || !function_exists('set_automation_config')) {
+        return; // automation layer not present
+    }
+
+    // Map legacy_id -> flow node, and label -> flow node (only mirrored nodes
+    // carry a legacy_id). The label map is a fallback because the keyboard page
+    // historically regenerated button ids, which can break the id link.
+    $byLegacy = [];
+    $byLabel  = [];
+    foreach ($tree['nodes'] as $n) {
+        $lid = (string) ($n['config']['legacy_id'] ?? '');
+        if ($lid !== '') {
+            $byLegacy[$lid] = $n;
+            $lbl = (string) ($n['label'] ?? '');
+            if ($lbl !== '') {
+                $byLabel[$lbl] = $n;
+            }
+        }
+    }
+
+    try {
+        $cfg = get_automation_config($bot_id);
+        $buttons = is_array($cfg['buttons'] ?? null) ? $cfg['buttons'] : [];
+        if (empty($buttons) && empty($byLegacy)) {
+            return; // nothing mirrored, nothing to do
+        }
+
+        // Only touch legacy buttons that were actually imported into THIS tree
+        // at some point. We detect "managed" buttons as those whose id appears
+        // in $byLegacy OR that were previously linked (flagged below). To avoid
+        // wiping buttons the admin created purely in the automation panel and
+        // never imported, we only delete a legacy button when it was clearly
+        // imported before (it has the flow_managed flag) and its node is gone.
+        $changed = false;
+        $kept = [];
+        foreach ($buttons as $b) {
+            if (!is_array($b) || empty($b['id'])) {
+                $kept[] = $b;
+                continue;
+            }
+            $bid = (string) $b['id'];
+            $blbl = (string) ($b['label'] ?? '');
+            $node = $byLegacy[$bid] ?? ($byLabel[$blbl] ?? null);
+            if ($node) {
+                // Node still exists -> sync its visible fields back to the button.
+                $b['label']   = (string) ($node['label'] ?? ($b['label'] ?? ''));
+                $b['message'] = (string) ($node['config']['message'] ?? ($b['message'] ?? ''));
+                $b['url']     = (string) ($node['config']['url'] ?? ($b['url'] ?? ''));
+                $b['flow_managed'] = true; // mark as imported/linked
+                $kept[] = $b;
+                $changed = true;
+            } else {
+                // No matching node. If this button was previously imported into
+                // the flow (flow_managed), the admin deleted its node -> drop it.
+                if (!empty($b['flow_managed'])) {
+                    $changed = true; // deletion = a change; simply don't keep it
+                    continue;
+                }
+                $kept[] = $b; // untouched automation-only button
+            }
+        }
+
+        if ($changed) {
+            $cfg['buttons'] = array_values($kept);
+            set_automation_config($cfg, $bot_id);
+        }
+    } catch (Throwable $e) {
+        error_log('flow_sync_legacy_buttons error: ' . $e->getMessage());
+    }
 }
 
 /** True when a non-trivial flow (more than just the root node) is stored. */

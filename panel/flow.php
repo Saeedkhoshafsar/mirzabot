@@ -319,6 +319,38 @@ $nodeTypes = flow_node_types();
             display: none;
         }
 
+        /* ---- Edge "cut link" button (hover/select an edge) ---- */
+        .edge-cut {
+            opacity: 0;
+            transition: opacity .12s ease;
+        }
+
+        .edge-cut.show {
+            opacity: 1;
+        }
+
+        .edge-cut-btn {
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            border: 1px solid #b91c1c;
+            background: #7f1d1d;
+            color: #fff;
+            font-size: 12px;
+            line-height: 1;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, .5);
+            padding: 0;
+        }
+
+        .edge-cut-btn:hover {
+            background: #b91c1c;
+            transform: scale(1.12);
+        }
+
         /* ---- Side panel (create / edit node) ---- */
         .side {
             position: absolute;
@@ -570,10 +602,11 @@ $nodeTypes = flow_node_types();
             <h1>🌳 ویرایشگر بصری دکمه‌های ربات</h1>
             <span id="status" class="status saved">ذخیره‌شده</span>
             <span class="spacer"></span>
-            <span class="hint">دابل‌کلیک=ویرایش • از پورت پایین بکشید=فرزند</span>
+            <span class="hint">دابل‌کلیک=ویرایش • از پورت پایین بکشید=فرزند • روی خط پیوند 🗑=قطع</span>
             <button id="btn-undo" class="tb-btn" title="واگرد (Ctrl+Z)" disabled>↶</button>
             <button id="btn-redo" class="tb-btn" title="ازنو (Ctrl+Y)" disabled>↷</button>
             <button id="btn-history" class="tb-btn" title="نسخه‌های ذخیره‌شده">🕓 تاریخچه</button>
+            <button id="btn-arrange" class="tb-btn" title="چیدمان درختی خودکار همهٔ نودها">🌿 مرتب‌سازی درختی</button>
             <button id="btn-add" class="tb-btn" title="افزودن نود ریشه‌ای جدید">➕ نود جدید</button>
             <button id="btn-migrate" class="tb-btn" title="ساخت درخت از دکمه‌های قدیمی">وارد کردن دکمه‌های قبلی</button>
             <button id="btn-reload" class="tb-btn">بارگذاری مجدد</button>
@@ -584,6 +617,8 @@ $nodeTypes = flow_node_types();
             <div class="toolbar-tip">
                 💡 برای ساخت زیرشاخه، از نقطهٔ پایین یک نود بکشید و در فضای خالی رها کنید.
                 دابل‌کلیک روی نود = ویرایش. انتخاب + کلید Delete = حذف.
+                برای قطع یک پیوند بدون حذف نود، موس را روی خط ببرید و دکمهٔ 🗑 را بزنید.
+                «🌿 مرتب‌سازی درختی» کل نودها را به‌صورت درخت می‌چیند.
             </div>
             <div class="legend">
                 <div><i style="background:#3b82f6"></i>دکمه &nbsp; <i style="background:#22c55e"></i>پیام

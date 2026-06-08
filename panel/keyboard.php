@@ -17,11 +17,32 @@ if ($method === 'POST' && isset($_POST['cb_save'])) {
     if (!is_array($cfg)) {
         $cfg = [];
     }
+    // Index the PREVIOUS buttons by label so we can keep a stable id and the
+    // flow_managed flag across re-saves. Regenerating ids on every save used to
+    // break the link between a button and its mirror node in the visual flow
+    // editor (and dropped flow_managed), so edits/deletes there silently stopped
+    // taking effect. Reusing the prior id + flag by label fixes that.
+    $prevById   = [];
+    $prevByLabel = [];
+    if (is_array($cfg['buttons'] ?? null)) {
+        foreach ($cfg['buttons'] as $pb) {
+            if (!is_array($pb)) {
+                continue;
+            }
+            if (!empty($pb['id'])) {
+                $prevById[(string) $pb['id']] = $pb;
+            }
+            if (!empty($pb['label'])) {
+                $prevByLabel[(string) $pb['label']] = $pb;
+            }
+        }
+    }
     $buttons = [];
     $bLabels = $_POST['btn_label']   ?? [];
     $bMsgs   = $_POST['btn_message'] ?? [];
     $bUrls   = $_POST['btn_url']     ?? [];
     $bActive = $_POST['btn_active']  ?? [];
+    $bIds    = $_POST['btn_id']      ?? []; // hidden field: stable id if present
     foreach ($bLabels as $i => $lbl) {
         $lbl = trim((string) $lbl);
         if ($lbl === '') {
@@ -31,14 +52,31 @@ if ($method === 'POST' && isset($_POST['cb_save'])) {
         if ($url !== '' && !preg_match('~^https?://~i', $url)) {
             $url = '';
         }
-        $buttons[] = [
-            'id'      => 'b' . substr(md5($lbl . $i . microtime()), 0, 8),
+        // Resolve a stable id: prefer the posted hidden id, else a previous
+        // button with the same label, else generate a fresh one.
+        $postedId = trim((string) ($bIds[$i] ?? ''));
+        $prev = null;
+        if ($postedId !== '' && isset($prevById[$postedId])) {
+            $prev = $prevById[$postedId];
+        } elseif (isset($prevByLabel[$lbl])) {
+            $prev = $prevByLabel[$lbl];
+        }
+        $id = ($prev && !empty($prev['id']))
+            ? (string) $prev['id']
+            : 'b' . substr(md5($lbl . $i . microtime()), 0, 8);
+        $row = [
+            'id'      => $id,
             'label'   => $lbl,
             'event'   => 'custom.trigger',
             'message' => trim((string) ($bMsgs[$i] ?? '')),
             'url'     => $url,
             'active'  => isset($bActive[$i]),
         ];
+        // Preserve the flow_managed flag so the flow editor keeps ownership.
+        if ($prev && !empty($prev['flow_managed'])) {
+            $row['flow_managed'] = true;
+        }
+        $buttons[] = $row;
     }
     $cfg['buttons'] = $buttons;
     set_automation_config($cfg, 0);
@@ -176,6 +214,7 @@ $customButtons = function_exists('automation_buttons') ? automation_buttons(0) :
                     foreach ($rows as $i => $b):
                         ?>
                         <div class="cb-row" style="border:1px solid #e2e8f0;border-radius:12px;padding:14px;margin-bottom:12px;background:#f8fafc">
+                            <input type="hidden" name="btn_id[<?= $i ?>]" value="<?= htmlspecialchars((string) ($b['id'] ?? '')) ?>">
                             <div style="display:grid;grid-template-columns:1fr;gap:10px">
                                 <div>
                                     <label style="font-size:12px;color:#475569;display:block;margin-bottom:4px">متن دکمه</label>
@@ -241,6 +280,7 @@ $customButtons = function_exists('automation_buttons') ? automation_buttons(0) :
             }
             function rowHtml(i) {
                 return '<div class="cb-row" style="border:1px solid #e2e8f0;border-radius:12px;padding:14px;margin-bottom:12px;background:#f8fafc">' +
+                    '<input type="hidden" name="btn_id[' + i + ']" value="">' +
                     '<div style="display:grid;grid-template-columns:1fr;gap:10px">' +
                     '<div><label style="font-size:12px;color:#475569;display:block;margin-bottom:4px">متن دکمه</label>' +
                     '<input type="text" name="btn_label[' + i + ']" placeholder="مثلاً: درخواست مشاوره" style="width:100%;padding:9px 11px;border:1px solid #cbd5e1;border-radius:9px;font-size:14px;box-sizing:border-box"></div>' +
