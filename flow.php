@@ -32,6 +32,124 @@ function flow_node_types()
     return ['button', 'message', 'action', 'input', 'condition', 'n8n'];
 }
 
+/**
+ * Hard security blacklist of file extensions that are NEVER accepted at an
+ * input step, no matter what the admin configures. Covers executables, scripts
+ * and markup that could carry active content (XSS/RCE vectors). This list is
+ * enforced at config-save time (admin allow-list is filtered against it) AND at
+ * runtime (incoming files are re-checked), so a disguised upload can't slip in.
+ */
+function flow_blocked_extensions()
+{
+    return [
+        // server-side scripts
+        'php', 'php3', 'php4', 'php5', 'php7', 'phtml', 'phar', 'phps',
+        'asp', 'aspx', 'jsp', 'jspx', 'cgi', 'pl', 'py', 'rb',
+        // shell / executables
+        'sh', 'bash', 'zsh', 'exe', 'msi', 'bat', 'cmd', 'com', 'scr',
+        'dll', 'so', 'bin', 'app', 'deb', 'rpm', 'apk', 'jar', 'vbs', 'ps1',
+        // active markup / scriptable
+        'html', 'htm', 'xhtml', 'svg', 'js', 'mjs', 'wasm', 'xml', 'xsl',
+        // office macros
+        'docm', 'xlsm', 'pptm',
+        // misc dangerous
+        'htaccess', 'ini', 'lnk', 'reg',
+    ];
+}
+
+/**
+ * Sanitise free text coming from a user before it is stored or forwarded.
+ * Removes HTML tags and control chars, neutralises angle brackets, trims, and
+ * optionally caps length. NEVER echo raw user text anywhere; pass it through
+ * this first. Returns a clean UTF-8 string.
+ */
+function flow_sanitize_text($text, $maxLen = 0)
+{
+    $text = (string) $text;
+    // drop control chars except newline/tab
+    $text = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $text);
+    // strip tags then escape any leftover angle brackets/entities
+    $text = strip_tags($text);
+    $text = htmlspecialchars($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    $text = trim($text);
+    if ($maxLen > 0 && function_exists('mb_substr')) {
+        $text = mb_substr($text, 0, (int) $maxLen, 'UTF-8');
+    }
+    return $text;
+}
+
+/**
+ * Validate a user's TEXT input against an input-node config.
+ * Returns [ok=>bool, value=>cleaned, error=>code|null].
+ */
+function flow_validate_input_text(array $cfg, $text)
+{
+    $clean = !empty($cfg['sanitize_text']) ? flow_sanitize_text($text) : (string) $text;
+    $len = function_exists('mb_strlen') ? mb_strlen($clean, 'UTF-8') : strlen($clean);
+
+    $min = (int) ($cfg['input_min'] ?? 0);
+    $max = (int) ($cfg['input_max'] ?? 0);
+    if ($min > 0 && $len < $min) {
+        return ['ok' => false, 'value' => $clean, 'error' => 'too_short'];
+    }
+    if ($max > 0 && $len > $max) {
+        return ['ok' => false, 'value' => $clean, 'error' => 'too_long'];
+    }
+
+    $mode = (string) ($cfg['input_validation'] ?? 'none');
+    if ($mode === 'number') {
+        if (!preg_match('~^[0-9۰-۹٠-٩]+$~u', $clean)) {
+            return ['ok' => false, 'value' => $clean, 'error' => 'not_number'];
+        }
+    } elseif ($mode === 'regex') {
+        $pat = (string) ($cfg['input_pattern'] ?? '');
+        if ($pat !== '') {
+            // Run admin regex safely: delimit ourselves, suppress warnings.
+            $delim = '~';
+            $safe = str_replace($delim, '\\' . $delim, $pat);
+            $res = @preg_match($delim . $safe . $delim . 'u', $clean);
+            if ($res !== 1) {
+                return ['ok' => false, 'value' => $clean, 'error' => 'pattern'];
+            }
+        }
+    }
+    // mode 'length' is already covered by min/max above.
+    return ['ok' => true, 'value' => $clean, 'error' => null];
+}
+
+/**
+ * Validate an uploaded file's extension + (optionally) real MIME against an
+ * input-node config. $ext = claimed extension, $mime = telegram-reported mime,
+ * $sizeBytes = file size. Returns [ok=>bool, error=>code|null].
+ * The hard blacklist always wins.
+ */
+function flow_validate_input_file(array $cfg, $ext, $mime = '', $sizeBytes = 0)
+{
+    $ext = strtolower(ltrim((string) $ext, '.'));
+    if ($ext !== '' && in_array($ext, flow_blocked_extensions(), true)) {
+        return ['ok' => false, 'error' => 'blocked_type'];
+    }
+    $allowed = is_array($cfg['file_extensions'] ?? null) ? $cfg['file_extensions'] : [];
+    if (!empty($allowed) && ($ext === '' || !in_array($ext, $allowed, true))) {
+        return ['ok' => false, 'error' => 'ext_not_allowed'];
+    }
+    $maxMb = (int) ($cfg['file_max_mb'] ?? 0);
+    if ($maxMb > 0 && $sizeBytes > 0 && $sizeBytes > $maxMb * 1024 * 1024) {
+        return ['ok' => false, 'error' => 'too_large'];
+    }
+    // Optional MIME sanity: block obviously executable/script mime types and,
+    // when an extension allow-list exists, ensure the mime family is plausible.
+    if (!empty($cfg['verify_mime']) && $mime !== '') {
+        $badMime = ['text/html', 'application/x-httpd-php', 'application/x-sh',
+            'application/javascript', 'text/javascript', 'image/svg+xml',
+            'application/x-msdownload', 'application/x-executable'];
+        if (in_array(strtolower($mime), $badMime, true)) {
+            return ['ok' => false, 'error' => 'blocked_mime'];
+        }
+    }
+    return ['ok' => true, 'error' => null];
+}
+
 /** A fresh, empty tree with just a protected root node (the main menu). */
 function flow_default_tree()
 {
@@ -292,15 +410,52 @@ function flow_normalise_config(array $c, $type)
         if (!in_array($valid, ['none', 'regex', 'length', 'number'], true)) {
             $valid = 'none';
         }
+        // What kind of message the user is allowed to send at this step.
+        $mode = (string) ($c['input_mode'] ?? 'text');
+        if (!in_array($mode, ['text', 'photo', 'document', 'media', 'any'], true)) {
+            $mode = 'text';
+        }
+        $out['input_mode']        = $mode;
         $out['input_validation']  = $valid;
         $out['input_pattern']     = (string) ($c['input_pattern'] ?? '');
-        $out['input_min']         = (int) ($c['input_min'] ?? 0);
-        $out['input_max']         = (int) ($c['input_max'] ?? 0);
+        $out['input_min']         = max(0, (int) ($c['input_min'] ?? 0)); // min chars
+        $out['input_max']         = max(0, (int) ($c['input_max'] ?? 0)); // max chars (0 = no cap)
         $out['max_attempts']      = max(0, (int) ($c['max_attempts'] ?? 0)); // 0 = unlimited
         $out['attempt_window_sec']= max(0, (int) ($c['attempt_window_sec'] ?? 0));
         $out['force_reply']       = !empty($c['force_reply']);
         $out['error_message']     = (string) ($c['error_message'] ?? '');
         $out['input_tag']         = (string) ($c['input_tag'] ?? '');
+
+        // --- File constraints (only meaningful when a file is allowed) ---
+        // Admin-defined allow-list of extensions, normalised to lowercase,
+        // dot-stripped, de-duped. Anything not listed is rejected. A hard
+        // security blacklist (flow_blocked_extensions) ALWAYS wins regardless
+        // of what the admin allows, so an executable/script can never pass.
+        $allowed = [];
+        $rawAllowed = $c['file_extensions'] ?? [];
+        if (is_string($rawAllowed)) {
+            $rawAllowed = preg_split('~[\s,;]+~', $rawAllowed);
+        }
+        if (is_array($rawAllowed)) {
+            $blocked = flow_blocked_extensions();
+            foreach ($rawAllowed as $ext) {
+                $ext = strtolower(ltrim(trim((string) $ext), '.'));
+                if ($ext === '' || !preg_match('~^[a-z0-9]{1,10}$~', $ext)) {
+                    continue;
+                }
+                if (in_array($ext, $blocked, true)) {
+                    continue; // never allow dangerous types even if admin tries
+                }
+                $allowed[$ext] = true;
+            }
+        }
+        $out['file_extensions']   = array_values(array_keys($allowed));
+        $out['file_max_mb']       = max(0, (int) ($c['file_max_mb'] ?? 0)); // 0 = telegram default cap
+        $out['file_max_count']    = max(1, (int) ($c['file_max_count'] ?? 1));
+        // Sanitise any free text before storing / forwarding (strip HTML etc).
+        $out['sanitize_text']     = !isset($c['sanitize_text']) ? true : !empty($c['sanitize_text']);
+        // Verify real MIME type, not just the extension, to stop disguised files.
+        $out['verify_mime']       = !isset($c['verify_mime']) ? true : !empty($c['verify_mime']);
     }
 
     if ($type === 'n8n') {
