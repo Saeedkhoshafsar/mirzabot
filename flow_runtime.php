@@ -180,6 +180,93 @@ function flow_runtime_keyboard(array $tree, array $node)
     return ['inline_keyboard' => $rows];
 }
 
+/** Display mode for a node's children: 'inline' | 'reply' | 'both'. */
+function flow_node_display_mode(array $node)
+{
+    $m = strtolower(trim((string) ($node['config']['display_mode'] ?? 'inline')));
+    return in_array($m, ['inline', 'reply', 'both'], true) ? $m : 'inline';
+}
+
+/**
+ * Build a REPLY keyboard for a node's children (plain-text buttons, bottom of
+ * screen). Reply buttons can't carry callback_data/url, so each is a plain text
+ * row and the runtime maps the tapped text back to the child node (see
+ * flow_runtime_handle → text matching). URL children are skipped here (a reply
+ * button can't open a link) — they still appear in the inline keyboard.
+ * Returns null when there's nothing to render.
+ */
+function flow_runtime_reply_keyboard(array $tree, array $node)
+{
+    $rows = [];
+    foreach (flow_children($tree, $node['id']) as $child) {
+        $kind = (string) ($child['node_kind'] ?? 'user');
+        if ($kind === 'system_menu' || $kind === 'system_demo' || $kind === 'root') {
+            continue;
+        }
+        if (!empty($child['disabled'])) {
+            continue;
+        }
+        if (!empty($child['config']['url'])) {
+            continue; // link buttons only make sense as inline
+        }
+        $label = (string) ($child['label'] ?? '');
+        if ($label === '') {
+            $label = '⬜';
+        }
+        $rows[] = [['text' => $label]];
+    }
+    // Navigation as plain-text rows too (matched back in the handler).
+    $cfg = $node['config'] ?? [];
+    $isRoot = ($node['id'] === flow_root_id($tree));
+    $navRow = [];
+    if (!$isRoot && !empty($node['parent']) && !empty($cfg['auto_back'])) {
+        $navRow[] = ['text' => '🔙 بازگشت'];
+    }
+    if (!$isRoot && !empty($cfg['auto_home'])) {
+        $navRow[] = ['text' => '🏠 منوی اصلی'];
+    }
+    if ($navRow) {
+        $rows[] = $navRow;
+    }
+    if (empty($rows)) {
+        return null;
+    }
+    return ['keyboard' => $rows, 'resize_keyboard' => true];
+}
+
+/**
+ * Find a direct child of $parentNode whose visible label matches $text (used to
+ * resolve reply-keyboard taps back to a node). Returns the child node or null.
+ * Also recognises the auto nav labels and returns the sentinel ids
+ * '__flowback__' / '__flowhome__'.
+ */
+function flow_match_child_by_text(array $tree, array $parentNode, $text)
+{
+    $text = trim((string) $text);
+    if ($text === '') {
+        return null;
+    }
+    if ($text === '🔙 بازگشت') {
+        return ['id' => '__flowback__'];
+    }
+    if ($text === '🏠 منوی اصلی') {
+        return ['id' => '__flowhome__'];
+    }
+    foreach (flow_children($tree, $parentNode['id']) as $child) {
+        $kind = (string) ($child['node_kind'] ?? 'user');
+        if ($kind === 'system_menu' || $kind === 'system_demo' || $kind === 'root') {
+            continue;
+        }
+        if (!empty($child['disabled'])) {
+            continue;
+        }
+        if (trim((string) ($child['label'] ?? '')) === $text) {
+            return $child;
+        }
+    }
+    return null;
+}
+
 /** The text shown for a node (message, or a fallback to the label). */
 function flow_runtime_text(array $node)
 {
@@ -236,8 +323,32 @@ function flow_runtime_enter(array $tree, $nodeId, array &$state, array $ctx)
         case 'button':
         case 'message':
         default:
-            $kb = flow_runtime_keyboard($tree, $node);
-            sendmessage($from_id, flow_runtime_text($node), json_encode($kb, JSON_UNESCAPED_UNICODE), 'HTML');
+            $mode = flow_node_display_mode($node);
+            $text = flow_runtime_text($node);
+            if ($mode === 'reply') {
+                // Reply-keyboard only. If there's nothing to show as reply
+                // (e.g. all children are URL buttons), fall back to inline so
+                // the user is never left without buttons.
+                $rkb = flow_runtime_reply_keyboard($tree, $node);
+                if ($rkb !== null) {
+                    sendmessage($from_id, $text, json_encode($rkb, JSON_UNESCAPED_UNICODE), 'HTML');
+                } else {
+                    $kb = flow_runtime_keyboard($tree, $node);
+                    sendmessage($from_id, $text, json_encode($kb, JSON_UNESCAPED_UNICODE), 'HTML');
+                }
+            } elseif ($mode === 'both') {
+                // Inline carries the message; a follow-up line installs the
+                // reply keyboard (Telegram can't attach both to one message).
+                $kb = flow_runtime_keyboard($tree, $node);
+                sendmessage($from_id, $text, json_encode($kb, JSON_UNESCAPED_UNICODE), 'HTML');
+                $rkb = flow_runtime_reply_keyboard($tree, $node);
+                if ($rkb !== null) {
+                    sendmessage($from_id, '⌨️', json_encode($rkb, JSON_UNESCAPED_UNICODE), 'HTML');
+                }
+            } else { // 'inline' (default)
+                $kb = flow_runtime_keyboard($tree, $node);
+                sendmessage($from_id, $text, json_encode($kb, JSON_UNESCAPED_UNICODE), 'HTML');
+            }
             flow_state_save($state);
             return true;
     }
@@ -588,6 +699,35 @@ function flow_runtime_handle(array $ctx)
     if (preg_match('/^flowgo_(.+)$/', $datain, $m)) {
         flow_runtime_enter($tree, $m[1], $state, $ctx);
         return true;
+    }
+
+    // ---- Reply-keyboard tap on a flow node ------------------------------
+    // When the user is parked on a flow node whose children are shown as a
+    // REPLY keyboard, taps arrive as plain text (no callback_data). Resolve the
+    // text back to the matching child (or the nav labels) and navigate. We only
+    // act on an EXACT match against the current node's own children, so normal
+    // bot text never gets hijacked.
+    if ($datain === '' && $text !== '' && !empty($state['current_node'])) {
+        $cur = flow_node($tree, (string) $state['current_node']);
+        if (is_array($cur)) {
+            $hit = flow_match_child_by_text($tree, $cur, $text);
+            if (is_array($hit) && !empty($hit['id'])) {
+                if ($hit['id'] === '__flowhome__') {
+                    flow_state_clear($from_id);
+                    $fresh = flow_state_get($from_id);
+                    flow_runtime_enter($tree, flow_root_id($tree), $fresh, $ctx);
+                    return true;
+                }
+                if ($hit['id'] === '__flowback__') {
+                    $parent = !empty($cur['parent']) ? (string) $cur['parent'] : '';
+                    $target = ($parent !== '' && flow_node($tree, $parent)) ? $parent : flow_root_id($tree);
+                    flow_runtime_enter($tree, $target, $state, $ctx);
+                    return true;
+                }
+                flow_runtime_enter($tree, (string) $hit['id'], $state, $ctx);
+                return true;
+            }
+        }
     }
 
     // ---- Awaited input (user typed/sent something on an input node) ------
