@@ -75,37 +75,9 @@ foreach ($preview['nodes'] as $n) {
     echo "   [" . $n['type'] . "] " . $n['label'] . ($n['system'] ? '  (system)' : '') . "\n";
 }
 
-// Phase-1 self test: build the خرید tree, validate, save, read back, history.
-if (isset($_GET['flowtest'])) {
-    echo "\n--- FLOW SELF-TEST (?flowtest=1) ---\n";
-    $t = flow_default_tree();
-    $mk = function ($id, $label, $parent, $type = 'button') {
-        return [
-            'id' => $id, 'type' => $type, 'label' => $label, 'parent' => $parent,
-            'system' => false, 'position' => ['x' => 0, 'y' => 0],
-            'config' => flow_normalise_config([], $type),
-        ];
-    };
-    $t['nodes'][] = $mk('buy', 'خرید', 'n_root');
-    $t['nodes'][] = $mk('cash', 'نقدی', 'buy');
-    $t['nodes'][] = $mk('inst', 'قسطی', 'buy');
-    $t['nodes'][] = $mk('m3', '۳ ماهه', 'inst');
-    $t['nodes'][] = $mk('m6', '۶ ماهه', 'inst');
-    foreach ([['n_root','buy'],['buy','cash'],['buy','inst'],['inst','m3'],['inst','m6']] as $e) {
-        $t['edges'][] = ['id' => 'e_' . $e[0] . '_' . $e[1], 'source' => $e[0], 'target' => $e[1]];
-    }
-    $v = flow_validate_tree($t);
-    echo "validate              : " . json_encode($v, JSON_UNESCAPED_UNICODE) . "\n";
-    $res = set_button_flow($t, 0, 'diag flowtest', 'diag');
-    echo "save ok               : " . var_export($res['ok'], true) . " err=" . var_export($res['error'], true) . "\n";
-    $back = get_button_flow(0);
-    echo "read back nodes       : " . count($back['nodes']) . "\n";
-    echo "children of خرید      : " . implode(', ', array_map(fn($c) => $c['label'], flow_children($back, 'buy'))) . "\n";
-    echo "children of قسطی      : " . implode(', ', array_map(fn($c) => $c['label'], flow_children($back, 'inst'))) . "\n";
-    echo "history revisions     : " . count(flow_history_list(0)) . "\n";
-    echo "\n>>> If save ok=true and children match (نقدی/قسطی and ۳ ماهه/۶ ماهه),\n";
-    echo ">>> Phase 1 (data layer) works end-to-end on production.\n";
-}
+// NOTE: the temporary "?flowtest=1" self-test was removed in Phase 9 because it
+// OVERWROTE the live button flow with sample data (destructive on production).
+// Read-only diagnostics above are sufficient to confirm the data layer.
 
 // 3) Write test ----------------------------------------------------------------
 if (isset($_GET['writetest'])) {
