@@ -117,26 +117,16 @@ $customButtons = function_exists('automation_buttons') ? automation_buttons(0) :
     </style>
 </head>
 
-<body>
+<body style="background:#eef2f7">
     <a class="btnback" href="index.php"><?= $textbotlang['panel']['keyboardSortHint'] ?></a>
     <a class="btndefult" href="keyboard.php?action=reaset"><?= $textbotlang['panel']['keyboardSaveBtn'] ?></a>
 
-    <div style="max-width:760px;margin:60px auto 18px;padding:0 14px">
-        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:8px 14px;color:#475569;font-size:13px;line-height:1.9">
-            بخش بالا فقط <b>ترتیب دکمه‌های اصلی</b> ربات را با کشیدن‌و‌رها‌کردن تنظیم می‌کند. برای ساختن
-            <b>دکمه‌های جدید دلخواه</b> (مثلاً «مشاوره» یا لینک سایت) از کادر پایین استفاده کنید.
-        </div>
-    </div>
-
-    <!-- React drag-sort app (orders the main reply keyboard) -->
-    <div id="root"></div>
-
-    <!-- ---------------------------------------------------------------- -->
-    <!-- Custom inline buttons manager                                     -->
-    <!-- ---------------------------------------------------------------- -->
-    <div id="custom-buttons" style="max-width:760px;margin:18px auto 60px;padding:0 14px">
+    <!-- ================================================================ -->
+    <!-- 1) Custom buttons manager  (FIRST so it's always visible)         -->
+    <!-- ================================================================ -->
+    <div id="custom-buttons" style="max-width:760px;margin:60px auto 18px;padding:0 14px">
         <div style="background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:18px 18px 22px;box-shadow:0 1px 3px rgba(0,0,0,.05)">
-            <h2 style="margin:0 0 4px;font-size:18px;color:#0f172a">دکمه‌های سفارشی ربات</h2>
+            <h2 style="margin:0 0 4px;font-size:18px;color:#0f172a">➕ دکمه‌های سفارشی ربات</h2>
             <p style="margin:0 0 16px;font-size:13px;color:#64748b;line-height:1.9">
                 این دکمه‌ها زیر منوی اصلی ربات (به‌صورت شیشه‌ای) به کاربر نمایش داده می‌شوند.
                 می‌توانید یک <b>پیام</b> برای ارسال هنگام کلیک تعیین کنید، یا یک <b>لینک</b> بدهید.
@@ -145,7 +135,7 @@ $customButtons = function_exists('automation_buttons') ? automation_buttons(0) :
 
             <?php if (isset($_GET['saved'])): ?>
                 <div style="background:#dcfce7;border:1px solid #86efac;color:#166534;border-radius:10px;padding:9px 14px;margin-bottom:14px;font-size:13px">
-                    ✅ دکمه‌ها ذخیره شدند.
+                    ✅ دکمه‌ها ذخیره شدند. (<?= count($customButtons) ?> دکمه فعال/ذخیره‌شده)
                 </div>
             <?php endif; ?>
 
@@ -204,6 +194,17 @@ $customButtons = function_exists('automation_buttons') ? automation_buttons(0) :
             </form>
         </div>
     </div>
+
+    <!-- ================================================================ -->
+    <!-- 2) React drag-sort app  (orders the MAIN reply keyboard)          -->
+    <!-- ================================================================ -->
+    <div style="max-width:760px;margin:0 auto 12px;padding:0 14px">
+        <div style="background:#f1f5f9;border:1px solid #e2e8f0;border-radius:12px;padding:10px 14px;color:#475569;font-size:13px;line-height:1.9">
+            <b>ترتیب دکمه‌های اصلی منو:</b> برای جابه‌جا کردن دکمه‌های پیش‌فرض ربات،
+            آن‌ها را در کادر زیر بکشید و رها کنید. (این بخش دکمه جدید نمی‌سازد.)
+        </div>
+    </div>
+    <div id="root"></div>
 
     <script>
         (function () {

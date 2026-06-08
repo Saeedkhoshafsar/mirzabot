@@ -2536,6 +2536,76 @@ function panel_is_shop()
 }
 
 /**
+ * The plain-VPN default main keyboard layout (template keys, not resolved text).
+ * This is the canonical "factory" layout shipped historically.
+ */
+function default_vpn_keyboard_json()
+{
+    return '{"keyboard":[[{"text":"text_sell"},{"text":"text_extend"}],[{"text":"text_usertest"},{"text":"text_wheel_luck"}],[{"text":"text_Purchased_services"},{"text":"accountwallet"}],[{"text":"text_affiliates"},{"text":"text_Tariff_list"}],[{"text":"text_support"},{"text":"text_help"}]]}';
+}
+
+/**
+ * Default main keyboard JSON for the active panel mode.
+ *
+ * For shop / digital / channel / custom profiles the VPN-only buttons
+ * (free test account, luck wheel, "extend service") make no sense, so they are
+ * dropped and a leaner, store-friendly layout is returned. The remaining keys
+ * reuse the SAME callback handlers (buy, account, backorder, support, help,
+ * affiliates, tariff) so nothing in the bot breaks — only VPN-specific buttons
+ * disappear. Plain VPN mode is returned untouched.
+ *
+ * @param string|null $mode  Force a mode; defaults to panel_mode().
+ */
+function default_main_keyboard_json($mode = null)
+{
+    $mode = $mode ?: (function_exists('panel_mode') ? panel_mode() : 'vpn');
+
+    if ($mode === 'vpn') {
+        return default_vpn_keyboard_json();
+    }
+
+    // Store-style layout: keep buy / my-orders / wallet / tariff / affiliates /
+    // support / help. Drop usertest, wheel_luck and extend.
+    $layout = [
+        'keyboard' => [
+            [['text' => 'text_sell'], ['text' => 'text_Purchased_services']],
+            [['text' => 'accountwallet'], ['text' => 'text_Tariff_list']],
+            [['text' => 'text_affiliates'], ['text' => 'text_support']],
+            [['text' => 'text_help']],
+        ],
+    ];
+    return json_encode($layout, JSON_UNESCAPED_UNICODE);
+}
+
+/**
+ * True when the stored keyboardmain still equals one of the factory defaults
+ * (VPN or any store layout). Used to decide whether it's safe to auto-swap the
+ * layout when the panel mode changes — we never overwrite a layout the admin
+ * has customised themselves.
+ */
+function keyboard_is_factory_default($stored)
+{
+    $stored = trim((string) $stored);
+    if ($stored === '') {
+        return true;
+    }
+    $norm = function ($j) {
+        $d = json_decode((string) $j, true);
+        return is_array($d) ? json_encode($d) : null;
+    };
+    $cur = $norm($stored);
+    if ($cur === null) {
+        return true; // unparseable → treat as resettable
+    }
+    foreach (['vpn', 'shop'] as $m) {
+        if ($cur === $norm(default_main_keyboard_json($m))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
  * Ready-made setup presets (step 9). Each preset bundles a profile with sane
  * default terminology and currency so a fresh install can be configured in one
  * click via the setup wizard (panel/wizard.php). Presets never overwrite the
