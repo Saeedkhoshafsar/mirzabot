@@ -10,6 +10,7 @@ require_once 'jdf.php';
 require_once 'function.php';
 require_once 'keyboard.php';
 require_once 'automation.php';
+require_once 'flow_runtime.php';
 require_once 'vendor/autoload.php';
 require_once 'panels.php';
 $textbotlang = languagechange();
@@ -400,6 +401,16 @@ if ($text == "/start" || $datain == "start" || $text == "start") {
     update("user", "Processing_value_tow", "0", "id", $from_id);
     update("user", "Processing_value_four", "0", "id", $from_id);
     step('home', $from_id);
+    // Visual Button Flow (Phase 7): if the admin has built a node tree, drop the
+    // user at its root menu right after the normal welcome. No-op when inactive.
+    if (function_exists('flow_runtime_handle') && function_exists('flow_is_active') && flow_is_active()) {
+        flow_runtime_handle([
+            'from_id' => $from_id,
+            'datain'  => 'flowhome',
+            'text'    => '',
+            'user'    => $user,
+        ]);
+    }
     return;
 } elseif ($text == "version") {
     sendmessage($from_id, $version, null, 'html');
@@ -656,6 +667,35 @@ if ($text == "/start" || $datain == "start" || $text == "start") {
     // Generic (non-VPN) shop purchase path — fully isolated from the VPN flow.
     $shopData = ($text === '/shop') ? 'shoplist' : $datain;
     shop_handle_callback($shopData, $from_id, $user);
+    return;
+} elseif (
+    // Visual Button Flow runtime (Phase 7): when the admin has built a node
+    // tree in the visual editor, navigation buttons (flowgo_/flowback/flowhome)
+    // and awaited input steps are handled here. Fully regression-safe: when no
+    // flow is active the whole condition short-circuits and legacy dispatch
+    // continues untouched below.
+    function_exists('flow_runtime_handle')
+    && (
+        $datain === 'flowback' || $datain === 'flowhome'
+        || (is_string($datain) && preg_match('/^flowgo_/', $datain))
+        || (is_string($datain) && $datain === '' && flow_state_has_await($from_id))
+    )
+    && ($flowRes = flow_runtime_handle([
+        'from_id'  => $from_id,
+        'text'     => $text,
+        'datain'   => $datain,
+        'user'     => $user,
+        'photo'    => $photo ?? 0,
+        'document' => $document ?? 0,
+        'fileid'   => $fileid ?? '',
+        'photoid'  => $photoid ?? '',
+        'caption'  => $caption ?? '',
+        'doc_name' => $update['message']['document']['file_name'] ?? '',
+        'doc_mime' => $update['message']['document']['mime_type'] ?? '',
+        'doc_size' => (int) ($update['message']['document']['file_size'] ?? 0),
+    ])) !== false
+) {
+    // Handled by the flow runtime (navigation / input / action node).
     return;
 } elseif (preg_match('/^cbtn_(.+)$/', (string) $datain, $cbm)) {
     // Custom automation button (Step 11): fire an n8n event with full user

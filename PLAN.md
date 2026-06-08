@@ -415,12 +415,13 @@ n8n فقط یک **افزونهٔ اختیاری** خواهد بود: بعداً 
     - [x] `flow_breadcrumb()`/`flow_path_ids()` (مسیر خرید→نقدی→درگاه→بانک ملی) + `flow_n8n_payload()`
     - [x] `flow_n8n_send()`: async = fire-and-forget با تایم‌اوت ۸۰۰ms (ضد قفل سرور)؛ sync = انتظار + parse JSON
     - [x] فرم n8n در پنل کناری (mode/endpoint/timeout/tag/send_path/send_inputs/wait_message)
-  - [ ] فاز ۷ — موتور اجرای زمان‌چت در ربات + دکمه‌های back/home خودکار (اولویت بالا — مهم‌ترین بخش باقی‌مانده)
-    - [ ] جدول state کاربر روی نود جاری (`button_flow_state` از قبل ساخته شده)
-    - [ ] پیمایش درخت هنگام تپ دکمه: نمایش فرزندان به‌عنوان دکمه + اجرای نوع نود (message/action/input/condition/n8n)
-    - [ ] دکمه‌های «بازگشت» و «منوی اصلی» خودکار در نودهای غیرریشه (طبق `auto_back`/`auto_home`)
-    - [ ] اجرای نود ورودی (دریافت متن/فایل + اعتبارسنجی + محدودیت تلاش) و نود شرط (انشعاب) و نود n8n
-    - [ ] رگرسیون: وقتی flow فعال نیست (`flow_is_active`=false) رفتار فعلی ربات دست‌نخورده
+  - [x] فاز ۷ — موتور اجرای زمان‌چت در ربات + دکمه‌های back/home خودکار  ✅ 2026-06-08
+    - [x] ماژول جدید `flow_runtime.php`: state کاربر روی `button_flow_state` (get/save/clear/has_await با upsert)
+    - [x] پیمایش درخت هنگام تپ دکمه: کیبورد inline با `flowgo_<id>` برای فرزندان + اجرای نوع نود (message/action/input/condition/n8n)
+    - [x] دکمه‌های «🔙 بازگشت» (`flowback`) و «🏠 منوی اصلی» (`flowhome`) خودکار در نودهای غیرریشه طبق `auto_back`/`auto_home`
+    - [x] اجرای نود ورودی (متن/عکس/سند + اعتبارسنجی + محدودیت تلاش)، نود شرط (resolve مقدار + branch jump)، نود n8n (async/sync + ذخیرهٔ پاسخ)
+    - [x] نود action: دکمهٔ inline با callback بیلت‌این (بدون re-entry خطرناک در زنجیرهٔ dispatch)
+    - [x] رگرسیون: gate در `index.php` فقط با پیشوند `flow*` یا await فعال؛ وقتی `flow_is_active`=false کل شرط short-circuit و رفتار قبلی ربات دست‌نخورده
   - [ ] فاز ۸ — Undo/Redo (Ctrl+Z) + UI تاریخچهٔ نسخه‌ها برای rollback
     - [ ] Undo/Redo سمت کلاینت روی تغییرات بوم
     - [ ] لیست نسخه‌های ذخیره‌شده (از `flow_history_list`) + دکمهٔ بازگردانی (`?api=restore`)
