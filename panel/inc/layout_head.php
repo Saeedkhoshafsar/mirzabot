@@ -145,6 +145,11 @@ $initials = mb_strtoupper(mb_substr($currentUser, 0, 1, 'UTF-8'), 'UTF-8');
             <span class="nav-icon"><?= icon('invoice') ?></span><span
               class="nav-label">سفارش‌ها</span>
           </a>
+          <a href="search.php" class="nav-item <?= $activeNav === 'search' ? 'active' : '' ?>"
+            title="جستجوی پیشرفته">
+            <span class="nav-icon"><?= icon('search') ?></span><span
+              class="nav-label">جستجوی پیشرفته</span>
+          </a>
         </div>
         <div class="nav-section">
           <div class="nav-heading"><?= $textbotlang['panel']['layoutSidebarToggleLabel'] ?></div>

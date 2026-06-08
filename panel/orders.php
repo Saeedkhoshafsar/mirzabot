@@ -140,6 +140,11 @@ include __DIR__ . '/inc/layout_head.php';
         $pname = $p['name_product'] ?? ('#' . $o['product_id']);
     }
     $st = $o['order_status'] ?? '';
+    // Linked shipping address (physical orders).
+    $addr = null;
+    if (!empty($o['address_id'])) {
+        $addr = db_fetch($pdo, "SELECT * FROM customer_address WHERE id = ?", [(int) $o['address_id']]);
+    }
 ?>
     <div class="card fade-up" style="margin-bottom:14px">
         <div class="card-head">
@@ -157,6 +162,16 @@ include __DIR__ . '/inc/layout_head.php';
             </div>
         </div>
         <div class="card-body">
+            <?php if ($addr): ?>
+                <div class="notice" style="margin-bottom:12px;line-height:1.9">
+                    <strong>📦 آدرس گیرنده</strong><br>
+                    <?php if (!empty($addr['full_name'])): ?>👤 <?= htmlspecialchars((string) $addr['full_name']) ?><br><?php endif; ?>
+                    <?php if (!empty($addr['phone'])): ?>📱 <?= htmlspecialchars((string) $addr['phone']) ?><br><?php endif; ?>
+                    📍 <?= htmlspecialchars(trim(((string) ($addr['province'] ?? '')) . ' ' . ((string) ($addr['city'] ?? '')))) ?><br>
+                    <?= htmlspecialchars((string) ($addr['address'] ?? '')) ?><br>
+                    <?php if (!empty($addr['postal_code'])): ?>🏷 کدپستی: <span style="font-family:var(--mono)"><?= htmlspecialchars((string) $addr['postal_code']) ?></span><?php endif; ?>
+                </div>
+            <?php endif; ?>
             <form method="POST" action="orders.php<?= $filter !== '' ? '?filter=' . urlencode($filter) : '' ?>">
                 <input type="hidden" name="_csrf" value="<?= csrf_token() ?>">
                 <input type="hidden" name="action" value="update_order">

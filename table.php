@@ -1022,6 +1022,36 @@ try {
     file_put_contents('error_log discount_usage', $e->getMessage());
 }
 //-----------------------------------------------------------------
+// customer_address: structured postal addresses for physical-product checkout
+// (step 8c). A user can save multiple addresses and mark one as default.
+// Completely separate from the VPN flow.
+try {
+    $result = $connect->query("SHOW TABLES LIKE 'customer_address'");
+    $table_exists = ($result->num_rows > 0);
+    if (!$table_exists) {
+        $result = $connect->query("CREATE TABLE customer_address (
+        id INT(11) UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        user_id varchar(200) NOT NULL,
+        bot_id INT(11) NOT NULL DEFAULT 0,
+        full_name varchar(300) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+        phone varchar(60) NULL,
+        province varchar(120) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+        city varchar(120) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+        postal_code varchar(40) NULL,
+        address TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+        is_default TINYINT(1) NOT NULL DEFAULT 0,
+        created_at TIMESTAMP NULL DEFAULT NULL,
+        KEY idx_user (user_id),
+        KEY idx_user_bot (user_id, bot_id))
+        ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci");
+        if (!$result) {
+            echo "table customer_address" . mysqli_error($connect);
+        }
+    }
+} catch (Exception $e) {
+    file_put_contents('error_log customer_address', $e->getMessage());
+}
+//-----------------------------------------------------------------
 try {
     $result = $connect->query("SHOW TABLES LIKE 'affiliates'");
     $table_exists = ($result->num_rows > 0);

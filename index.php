@@ -614,9 +614,19 @@ if ($text == "/start" || $datain == "start" || $text == "start") {
 } elseif (preg_match('/^shop_coupon_\d+$/', (string) ($user['step'] ?? '')) && shop_handle_coupon_step($user['step'], $text, $from_id, $user)) {
     // User is typing a coupon code for a shop product.
     return;
+} elseif (preg_match('/^shop_address_(name|phone|province|city|addr|postal)$/', (string) ($user['step'] ?? '')) && shop_handle_address_step($user['step'], $text, $from_id, $user)) {
+    // User is entering a postal address for a physical shop product.
+    return;
+} elseif (($user['step'] ?? '') === 'shop_search' && shop_handle_search_step($user['step'], $text, $from_id, $user)) {
+    // User is typing a product search query.
+    return;
 } elseif ($datain === 'shoporders' || $text === '/myorders') {
     // Customer's own shop orders + tracking codes — isolated from the VPN flow.
     shop_render_my_orders($from_id);
+    return;
+} elseif ($datain === 'shopsearch' || $text === '/search') {
+    // Start product search.
+    shop_handle_callback('shopsearch', $from_id, $user);
     return;
 } elseif (
     $datain === 'shoplist' || $text === '/shop'

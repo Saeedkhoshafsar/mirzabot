@@ -2474,6 +2474,13 @@ function shop_product_available($product)
         $c = product_codes_count((int) $product['id']);
         return $c['available'] > 0;
     }
+    // Physical products with tracked stock are unavailable when stock hits 0.
+    if (function_exists('product_tracks_stock') && product_tracks_stock($product)) {
+        $stock = product_stock($product);
+        if ($stock !== null && $stock <= 0) {
+            return false;
+        }
+    }
     return true;
 }
 
@@ -2501,8 +2508,95 @@ function shop_render_list($from_id)
             'callback_data' => 'shopview_' . (int) $p['id'],
         ]];
     }
+    $kb['inline_keyboard'][] = [['text' => '🔍 جستجوی محصول', 'callback_data' => 'shopsearch']];
     $kb['inline_keyboard'][] = [['text' => '🔙 بازگشت', 'callback_data' => 'backuser']];
     sendmessage($from_id, "🛍 <b>" . store_term('store', 'فروشگاه') . "</b>\nیک محصول را انتخاب کنید:", json_encode($kb), 'html');
+}
+
+/**
+ * Search shop products (non-VPN) by name / note / category / SKU (attributes).
+ * Returns matching product rows scoped to the current bot.
+ */
+function shop_search_products($query, $bot_id = null, $limit = 30)
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return [];
+    }
+    if ($bot_id === null) {
+        $bot_id = defined('BOT_ID') ? (int) BOT_ID : 0;
+    }
+    $query = trim((string) $query);
+    if ($query === '') {
+        return [];
+    }
+    $like = '%' . $query . '%';
+    try {
+        $stmt = $pdo->prepare(
+            "SELECT * FROM product
+             WHERE product_type <> 'vpn' AND (bot_id = ? OR bot_id = 0)
+               AND (name_product LIKE ? OR note LIKE ? OR category LIKE ? OR attributes LIKE ?)
+             ORDER BY id DESC LIMIT " . (int) $limit
+        );
+        $stmt->execute([(int) $bot_id, $like, $like, $like, $like]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    } catch (Exception $e) {
+        error_log("shop_search_products error: " . $e->getMessage());
+        return [];
+    }
+}
+
+/**
+ * Render search results as a product keyboard (same shape as the list).
+ */
+function shop_render_search_results($from_id, $query)
+{
+    $cur     = store_currency();
+    $results = shop_search_products($query);
+    if (empty($results)) {
+        sendmessage(
+            $from_id,
+            "نتیجه‌ای برای «" . htmlspecialchars((string) $query) . "» پیدا نشد.",
+            json_encode(['inline_keyboard' => [
+                [['text' => '🔍 جستجوی دوباره', 'callback_data' => 'shopsearch']],
+                [['text' => '🛍 همهٔ محصولات', 'callback_data' => 'shoplist']],
+                [['text' => '🔙 بازگشت', 'callback_data' => 'backuser']],
+            ]]),
+            'html'
+        );
+        return;
+    }
+    $kb = ['inline_keyboard' => []];
+    foreach ($results as $p) {
+        $price = (int) preg_replace('/[^\d]/', '', (string) ($p['price_product'] ?? '0'));
+        $label = $p['name_product'] . ' — ' . number_format($price) . ' ' . $cur;
+        if (!shop_product_available($p)) {
+            $label = '⛔️ ' . $label;
+        }
+        $kb['inline_keyboard'][] = [['text' => $label, 'callback_data' => 'shopview_' . (int) $p['id']]];
+    }
+    $kb['inline_keyboard'][] = [['text' => '🔍 جستجوی دوباره', 'callback_data' => 'shopsearch']];
+    $kb['inline_keyboard'][] = [['text' => '🔙 بازگشت', 'callback_data' => 'backuser']];
+    sendmessage(
+        $from_id,
+        "🔍 نتایج جستجو برای «<b>" . htmlspecialchars((string) $query) . "</b>» (" . count($results) . "):",
+        json_encode($kb),
+        'html'
+    );
+}
+
+/**
+ * Handle the "type your search query" text step in the shop flow.
+ * Returns true if handled.
+ */
+function shop_handle_search_step($step, $text, $from_id, $user)
+{
+    if ((string) $step !== 'shop_search') {
+        return false;
+    }
+    step('home', $from_id);
+    shop_render_search_results($from_id, trim((string) $text));
+    return true;
 }
 
 /**
@@ -2542,6 +2636,19 @@ function shop_render_product($from_id, $product)
         $lines[] = "\n" . htmlspecialchars($product['note']);
     }
     $lines[] = "\n💰 " . number_format($price) . " " . $cur;
+    // Show remaining stock when tracked (helps create urgency / clarity).
+    if (function_exists('product_tracks_stock') && product_tracks_stock($product)) {
+        $stock = product_stock($product);
+        if ($stock !== null) {
+            if ($stock <= 0) {
+                $lines[] = "⛔️ ناموجود";
+            } elseif ($stock <= 5) {
+                $lines[] = "⚠️ تنها <b>" . number_format($stock) . "</b> عدد باقی مانده";
+            } else {
+                $lines[] = "✅ موجود (" . number_format($stock) . " عدد)";
+            }
+        }
+    }
     if (!$avail) {
         $lines[] = "\n⛔️ ناموجود";
     }
@@ -2617,8 +2724,12 @@ function shop_deliver_product($from_id, $product, $order_id = null)
             return 'service:noted';
 
         case 'physical':
-            // Full address + shipping flow arrives in step 8c. For now confirm
-            // the order so balance/record are consistent.
+            // Decrement tracked stock (no-op when stock is unlimited).
+            if (function_exists('product_tracks_stock') && product_tracks_stock($product)) {
+                product_decrement_stock((int) $product['id'], 1);
+            }
+            // Confirm the order; address is collected in the checkout flow and
+            // tracking/shipping is handled later by the admin (step 8b panel).
             sendmessage($from_id, "✅ سفارش شما ثبت شد. برای هماهنگی ارسال با شما تماس گرفته می‌شود.", null, 'html');
             return 'physical:recorded';
     }
@@ -2629,15 +2740,15 @@ function shop_deliver_product($from_id, $product, $order_id = null)
  * Record a shop order in Payment_report (reusing the existing order table).
  * Returns the generated order id.
  */
-function shop_record_order($from_id, $product, $price, $status = 'paid')
+function shop_record_order($from_id, $product, $price, $status = 'paid', $address_id = null)
 {
     global $connect;
     $orderId = 'SHOP-' . time() . '-' . (int) $product['id'];
     try {
         $stmt = $connect->prepare(
             "INSERT INTO Payment_report
-             (id_user, id_order, time, price, payment_Status, Payment_Method, product_id, order_status)
-             VALUES (?,?,?,?,?,?,?,?)"
+             (id_user, id_order, time, price, payment_Status, Payment_Method, product_id, order_status, address_id)
+             VALUES (?,?,?,?,?,?,?,?,?)"
         );
         $now = date('Y-m-d H:i:s');
         $stmt->execute([
@@ -2649,6 +2760,7 @@ function shop_record_order($from_id, $product, $price, $status = 'paid')
             'wallet',
             (int) $product['id'],
             $status,
+            $address_id !== null ? (int) $address_id : null,
         ]);
     } catch (Exception $e) {
         error_log("shop_record_order error: " . $e->getMessage());
@@ -2875,6 +2987,13 @@ function shop_handle_callback($datain, $from_id, $user)
         return true;
     }
 
+    // Start a product search: ask the user to type a query.
+    if ($datain === 'shopsearch') {
+        step('shop_search', $from_id);
+        sendmessage($from_id, "🔍 عبارت جستجو را ارسال کنید (نام محصول، دسته یا کد):", null, 'html');
+        return true;
+    }
+
     // View a product.
     if (preg_match('/^shopview_(\d+)$/', $datain, $m)) {
         $product = shop_product((int) $m[1]);
@@ -2909,6 +3028,26 @@ function shop_handle_callback($datain, $from_id, $user)
             sendmessage($from_id, "⛔️ این محصول در حال حاضر ناموجود است.", null, 'html');
             return true;
         }
+
+        // Physical products that need a postal address: ensure one exists first.
+        $needsAddress = ($product['product_type'] ?? '') === 'physical'
+            && (string) product_attr($product, 'needs_address', '') === '1';
+        $addressId = null;
+        if ($needsAddress) {
+            $addr = address_default($from_id);
+            if (!$addr) {
+                // No saved address — start the address-collection flow, keeping
+                // the product id (and any applied coupon) so we resume the buy.
+                $pvKeep = (is_string($user['Processing_value'] ?? '') && strpos($user['Processing_value'], 'shop_dc:') === 0)
+                    ? '|' . $user['Processing_value'] : '';
+                update("user", "Processing_value", 'shop_addr:' . (int) $product['id'] . $pvKeep, "id", $from_id);
+                step('shop_address_name', $from_id);
+                sendmessage($from_id, "📦 برای ارسال این محصول به آدرس پستی نیاز داریم.\n\nلطفاً <b>نام و نام خانوادگی گیرنده</b> را ارسال کنید:", null, 'html');
+                return true;
+            }
+            $addressId = (int) $addr['id'];
+        }
+
         $price   = (int) preg_replace('/[^\d]/', '', (string) ($product['price_product'] ?? '0'));
         $balance = (int) ($user['Balance'] ?? 0);
 
@@ -2939,7 +3078,7 @@ function shop_handle_callback($datain, $from_id, $user)
         // Deduct balance, record order, deliver.
         $newBalance = $balance - $payable;
         update("user", "Balance", $newBalance, "id", $from_id);
-        $orderId = shop_record_order($from_id, $product, $payable, 'paid');
+        $orderId = shop_record_order($from_id, $product, $payable, 'paid', $addressId);
         $status  = shop_deliver_product($from_id, $product, $orderId);
 
         // If a serial code/file couldn't be delivered, refund to keep things fair.
@@ -3013,6 +3152,111 @@ function shop_handle_coupon_step($step, $text, $from_id, $user)
         [['text' => "🔙 بازگشت", 'callback_data' => "backuser"]],
     ]]);
     sendmessage($from_id, $msg, $kb, 'html');
+    return true;
+}
+
+/**
+ * Handle the multi-step address-collection flow for physical products.
+ * Steps: shop_address_name → _phone → _province → _city → _addr → _postal.
+ * Temp values accumulate in Processing_value as "shop_addr:{pid}|...|k=v".
+ * On completion the address is saved and the buy is resumed automatically.
+ * Returns true if the step was handled.
+ */
+function shop_handle_address_step($step, $text, $from_id, $user)
+{
+    $steps = [
+        'shop_address_name'     => ['key' => 'full_name',   'next' => 'shop_address_phone',    'prompt' => "📱 شمارهٔ تماس گیرنده را ارسال کنید:"],
+        'shop_address_phone'    => ['key' => 'phone',       'next' => 'shop_address_province', 'prompt' => "📍 استان را ارسال کنید:"],
+        'shop_address_province' => ['key' => 'province',    'next' => 'shop_address_city',     'prompt' => "🏙 شهر را ارسال کنید:"],
+        'shop_address_city'     => ['key' => 'city',        'next' => 'shop_address_addr',     'prompt' => "🏠 نشانی کامل پستی را ارسال کنید:"],
+        'shop_address_addr'     => ['key' => 'address',     'next' => 'shop_address_postal',   'prompt' => "🏷 کدپستی ۱۰ رقمی را ارسال کنید:"],
+        'shop_address_postal'   => ['key' => 'postal_code', 'next' => null,                    'prompt' => null],
+    ];
+    if (!isset($steps[(string) $step])) {
+        return false;
+    }
+    $text = trim((string) $text);
+    if ($text === '') {
+        sendmessage($from_id, "مقدار خالی است؛ لطفاً دوباره ارسال کنید.", null, 'html');
+        return true;
+    }
+
+    // Parse the carrier value: "shop_addr:{pid}[|shop_dc:{code}][|k=v|k=v...]".
+    $pv = (string) ($user['Processing_value'] ?? '');
+    $parts = explode('|', $pv);
+    $head  = array_shift($parts); // shop_addr:{pid}
+    if (strpos($head, 'shop_addr:') !== 0) {
+        step('home', $from_id);
+        return true;
+    }
+    $pid = (int) substr($head, strlen('shop_addr:'));
+
+    // Collected fields and any preserved coupon.
+    $coupon = null;
+    $fields = [];
+    foreach ($parts as $p) {
+        if (strpos($p, 'shop_dc:') === 0) {
+            $coupon = $p; // keep verbatim to re-apply on resume
+        } elseif (strpos($p, '=') !== false) {
+            [$k, $v] = explode('=', $p, 2);
+            $fields[$k] = $v;
+        }
+    }
+
+    // Light validation for phone & postal code (Iran-style, lenient).
+    $cur = $steps[(string) $step];
+    if ($cur['key'] === 'phone' && !preg_match('/^[0-9+][0-9]{6,14}$/', preg_replace('/\s/', '', $text))) {
+        sendmessage($from_id, "شمارهٔ تماس نامعتبر است؛ لطفاً دوباره ارسال کنید.", null, 'html');
+        return true;
+    }
+    if ($cur['key'] === 'postal_code' && !preg_match('/^[0-9]{10}$/', preg_replace('/\D/', '', $text))) {
+        sendmessage($from_id, "کدپستی باید ۱۰ رقم باشد؛ لطفاً دوباره ارسال کنید.", null, 'html');
+        return true;
+    }
+
+    // Store this field (encode = and | to keep the carrier parseable).
+    $clean = str_replace(['=', '|'], [' ', ' '], $text);
+    $fields[$cur['key']] = $clean;
+
+    if ($cur['next'] !== null) {
+        // Rebuild the carrier and advance to the next step.
+        $carrier = 'shop_addr:' . $pid;
+        if ($coupon !== null) {
+            $carrier .= '|' . $coupon;
+        }
+        foreach ($fields as $k => $v) {
+            $carrier .= '|' . $k . '=' . $v;
+        }
+        update("user", "Processing_value", $carrier, "id", $from_id);
+        step($cur['next'], $from_id);
+        sendmessage($from_id, $cur['prompt'], null, 'html');
+        return true;
+    }
+
+    // Final step: save the address, restore any coupon, and resume the buy.
+    $newId = address_save($from_id, $fields, true);
+    if ($coupon !== null) {
+        update("user", "Processing_value", $coupon, "id", $from_id);
+    } else {
+        update("user", "Processing_value", "0", "id", $from_id);
+    }
+    step('home', $from_id);
+
+    $product = shop_product($pid);
+    if (!$product) {
+        sendmessage($from_id, "✅ آدرس ذخیره شد، اما محصول دیگر در دسترس نیست.", null, 'html');
+        return true;
+    }
+    sendmessage(
+        $from_id,
+        "✅ آدرس شما ذخیره شد:\n\n" . address_format(address_get($newId, $from_id))
+            . "\n\nبرای تکمیل خرید روی دکمهٔ زیر بزنید.",
+        json_encode(['inline_keyboard' => [
+            [['text' => "🛒 تکمیل خرید", 'callback_data' => "shopbuy_" . $pid]],
+            [['text' => "🔙 بازگشت", 'callback_data' => "backuser"]],
+        ]]),
+        'html'
+    );
     return true;
 }
 
@@ -3274,6 +3518,292 @@ function shop_render_my_orders($from_id)
     }
     sendmessage($from_id, $msg, null, 'html');
     return true;
+}
+
+// ===========================================================================
+// Inventory / stock (step 8c) — built on the existing product.attributes JSON.
+// Product-level stock lives in attributes.stock; per-variant stock lives in
+// attributes.variants[].stock. A stock of '' / null means "unlimited" (the
+// VPN flow and digital/serial/service products are never gated by this).
+// ===========================================================================
+
+/**
+ * Whether stock tracking is meaningful for a product (physical with a numeric
+ * stock attribute or variants that declare stock).
+ */
+function product_tracks_stock($product)
+{
+    if (!is_array($product)) {
+        return false;
+    }
+    if (($product['product_type'] ?? '') !== 'physical') {
+        return false;
+    }
+    $stock = product_attr($product, 'stock', null);
+    if ($stock !== null && $stock !== '') {
+        return true;
+    }
+    $variants = product_attr($product, 'variants', null);
+    if (is_array($variants)) {
+        foreach ($variants as $v) {
+            if (isset($v['stock']) && $v['stock'] !== '') {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/**
+ * Current total stock for a physical product. If variants declare stock, the
+ * total is the sum of variant stocks; otherwise the product-level stock.
+ * Returns null when stock is not tracked (treated as unlimited).
+ */
+function product_stock($product)
+{
+    if (!product_tracks_stock($product)) {
+        return null;
+    }
+    $variants = product_attr($product, 'variants', null);
+    if (is_array($variants)) {
+        $sum = 0;
+        $any = false;
+        foreach ($variants as $v) {
+            if (isset($v['stock']) && $v['stock'] !== '') {
+                $sum += max(0, (int) $v['stock']);
+                $any = true;
+            }
+        }
+        if ($any) {
+            return $sum;
+        }
+    }
+    $stock = product_attr($product, 'stock', null);
+    return ($stock === null || $stock === '') ? null : max(0, (int) $stock);
+}
+
+/**
+ * Decrement a product's stock by $qty after a successful sale.
+ * If $variantKey is given (matches a variant SKU/color-size), that variant's
+ * stock is reduced; otherwise the product-level stock is reduced.
+ * No-op when stock is not tracked. Returns true if a write happened.
+ */
+function product_decrement_stock($product_id, $qty = 1, $variantKey = null)
+{
+    global $pdo;
+    if (!isset($pdo) || $qty < 1) {
+        return false;
+    }
+    try {
+        $stmt = $pdo->prepare("SELECT * FROM product WHERE id = ? LIMIT 1");
+        $stmt->execute([(int) $product_id]);
+        $product = $stmt->fetch(PDO::FETCH_ASSOC);
+    } catch (Exception $e) {
+        error_log("product_decrement_stock fetch error: " . $e->getMessage());
+        return false;
+    }
+    if (!$product || !product_tracks_stock($product)) {
+        return false;
+    }
+    $attrs    = product_attributes($product);
+    $changed  = false;
+
+    if ($variantKey !== null && !empty($attrs['variants']) && is_array($attrs['variants'])) {
+        foreach ($attrs['variants'] as &$v) {
+            $vk = trim((string) ($v['sku'] ?? '')) !== ''
+                ? (string) $v['sku']
+                : trim(((string) ($v['color'] ?? '')) . '/' . ((string) ($v['size'] ?? '')), '/');
+            if ($vk === (string) $variantKey && isset($v['stock']) && $v['stock'] !== '') {
+                $v['stock'] = max(0, (int) $v['stock'] - (int) $qty);
+                $changed = true;
+                break;
+            }
+        }
+        unset($v);
+    }
+
+    if (!$changed && isset($attrs['stock']) && $attrs['stock'] !== '') {
+        $attrs['stock'] = max(0, (int) $attrs['stock'] - (int) $qty);
+        $changed = true;
+    }
+
+    if (!$changed) {
+        return false;
+    }
+    try {
+        $pdo->prepare("UPDATE product SET attributes = ? WHERE id = ?")
+            ->execute([json_encode($attrs, JSON_UNESCAPED_UNICODE), (int) $product_id]);
+        return true;
+    } catch (Exception $e) {
+        error_log("product_decrement_stock write error: " . $e->getMessage());
+        return false;
+    }
+}
+
+// ===========================================================================
+// Customer addresses (step 8c) — structured postal addresses for physical
+// product checkout. Separate table; never touches the VPN flow.
+// ===========================================================================
+
+/** List a user's saved addresses (default first, then newest). */
+function address_list($user_id, $bot_id = null)
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return [];
+    }
+    if ($bot_id === null) {
+        $bot_id = defined('BOT_ID') ? (int) BOT_ID : 0;
+    }
+    try {
+        $stmt = $pdo->prepare(
+            "SELECT * FROM customer_address
+             WHERE user_id = ? AND (bot_id = ? OR bot_id = 0)
+             ORDER BY is_default DESC, id DESC"
+        );
+        $stmt->execute([(string) $user_id, (int) $bot_id]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    } catch (Exception $e) {
+        error_log("address_list error: " . $e->getMessage());
+        return [];
+    }
+}
+
+/** Fetch a single address row by id (optionally scoped to a user). */
+function address_get($id, $user_id = null)
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return null;
+    }
+    try {
+        if ($user_id !== null) {
+            $stmt = $pdo->prepare("SELECT * FROM customer_address WHERE id = ? AND user_id = ? LIMIT 1");
+            $stmt->execute([(int) $id, (string) $user_id]);
+        } else {
+            $stmt = $pdo->prepare("SELECT * FROM customer_address WHERE id = ? LIMIT 1");
+            $stmt->execute([(int) $id]);
+        }
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row ?: null;
+    } catch (Exception $e) {
+        error_log("address_get error: " . $e->getMessage());
+        return null;
+    }
+}
+
+/** The user's default address (or first available), or null. */
+function address_default($user_id, $bot_id = null)
+{
+    $list = address_list($user_id, $bot_id);
+    return $list[0] ?? null;
+}
+
+/**
+ * Save a new address. $data keys: full_name, phone, province, city,
+ * postal_code, address. If $makeDefault, all other addresses are unset.
+ * Returns the new address id or null.
+ */
+function address_save($user_id, array $data, $makeDefault = true, $bot_id = null)
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return null;
+    }
+    if ($bot_id === null) {
+        $bot_id = defined('BOT_ID') ? (int) BOT_ID : 0;
+    }
+    try {
+        if ($makeDefault) {
+            $pdo->prepare("UPDATE customer_address SET is_default = 0 WHERE user_id = ? AND bot_id = ?")
+                ->execute([(string) $user_id, (int) $bot_id]);
+        }
+        $stmt = $pdo->prepare(
+            "INSERT INTO customer_address
+             (user_id, bot_id, full_name, phone, province, city, postal_code, address, is_default, created_at)
+             VALUES (?,?,?,?,?,?,?,?,?,NOW())"
+        );
+        $stmt->execute([
+            (string) $user_id,
+            (int) $bot_id,
+            (string) ($data['full_name'] ?? ''),
+            (string) ($data['phone'] ?? ''),
+            (string) ($data['province'] ?? ''),
+            (string) ($data['city'] ?? ''),
+            (string) ($data['postal_code'] ?? ''),
+            (string) ($data['address'] ?? ''),
+            $makeDefault ? 1 : 0,
+        ]);
+        return (int) $pdo->lastInsertId();
+    } catch (Exception $e) {
+        error_log("address_save error: " . $e->getMessage());
+        return null;
+    }
+}
+
+/** Set an address as the user's default. */
+function address_set_default($id, $user_id, $bot_id = null)
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return false;
+    }
+    if ($bot_id === null) {
+        $bot_id = defined('BOT_ID') ? (int) BOT_ID : 0;
+    }
+    try {
+        $pdo->prepare("UPDATE customer_address SET is_default = 0 WHERE user_id = ? AND bot_id = ?")
+            ->execute([(string) $user_id, (int) $bot_id]);
+        $pdo->prepare("UPDATE customer_address SET is_default = 1 WHERE id = ? AND user_id = ?")
+            ->execute([(int) $id, (string) $user_id]);
+        return true;
+    } catch (Exception $e) {
+        error_log("address_set_default error: " . $e->getMessage());
+        return false;
+    }
+}
+
+/** Delete an address (scoped to the owner). */
+function address_delete($id, $user_id)
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return false;
+    }
+    try {
+        $pdo->prepare("DELETE FROM customer_address WHERE id = ? AND user_id = ?")
+            ->execute([(int) $id, (string) $user_id]);
+        return true;
+    } catch (Exception $e) {
+        error_log("address_delete error: " . $e->getMessage());
+        return false;
+    }
+}
+
+/** Format an address row into a readable Persian block. */
+function address_format($addr)
+{
+    if (!is_array($addr)) {
+        return '';
+    }
+    $lines = [];
+    if (!empty($addr['full_name'])) {
+        $lines[] = "👤 " . htmlspecialchars((string) $addr['full_name']);
+    }
+    if (!empty($addr['phone'])) {
+        $lines[] = "📱 " . htmlspecialchars((string) $addr['phone']);
+    }
+    $loc = trim(((string) ($addr['province'] ?? '')) . ' ' . ((string) ($addr['city'] ?? '')));
+    if ($loc !== '') {
+        $lines[] = "📍 " . htmlspecialchars($loc);
+    }
+    if (!empty($addr['address'])) {
+        $lines[] = htmlspecialchars((string) $addr['address']);
+    }
+    if (!empty($addr['postal_code'])) {
+        $lines[] = "🏷 کدپستی: <code>" . htmlspecialchars((string) $addr['postal_code']) . "</code>";
+    }
+    return implode("\n", $lines);
 }
 
 function generateAuthStr($length = 10)
