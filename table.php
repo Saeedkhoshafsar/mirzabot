@@ -597,6 +597,37 @@ try {
     file_put_contents('error_log product_media', $e->getMessage());
 }
 //-----------------------------------------------------------------
+// product_codes: serial / license codes pool for product_type = 'serial_code'.
+// Each code is delivered to one buyer on purchase, then marked sold.
+try {
+    $result = $connect->query("SHOW TABLES LIKE 'product_codes'");
+    $table_exists = ($result->num_rows > 0);
+
+    if (!$table_exists) {
+        $result = $connect->query("CREATE TABLE product_codes (
+        id INT(11) UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        product_id INT(11) NOT NULL,
+        code varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+        status varchar(20) NOT NULL DEFAULT 'available',
+        buyer_id varchar(200) NULL,
+        order_id varchar(2000) NULL,
+        sold_at TIMESTAMP NULL DEFAULT NULL,
+        created_at TIMESTAMP NULL DEFAULT NULL,
+        KEY idx_product (product_id),
+        KEY idx_status (product_id, status))
+        ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci");
+        if (!$result) {
+            echo "table product_codes" . mysqli_error($connect);
+        }
+    } else {
+        addFieldToTable("product_codes", "buyer_id", null, "varchar(200)");
+        addFieldToTable("product_codes", "order_id", null, "varchar(2000)");
+        addFieldToTable("product_codes", "sold_at", null, "TIMESTAMP NULL DEFAULT NULL");
+    }
+} catch (Exception $e) {
+    file_put_contents('error_log product_codes', $e->getMessage());
+}
+//-----------------------------------------------------------------
 try {
 
     $result = $connect->query("SHOW TABLES LIKE 'invoice'");

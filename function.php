@@ -2139,6 +2139,183 @@ function product_media_detect($tmpPath, $originalName = '')
     return null;
 }
 
+// ===========================================================================
+// Serial / license codes (product_type = 'serial_code')
+// A pool of codes per product; each is delivered once on purchase.
+// ===========================================================================
+
+/**
+ * List codes for a product, newest first. Optional status filter.
+ */
+function product_codes_list($product_id, $status = null, $limit = 0)
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return [];
+    }
+    try {
+        $sql = "SELECT * FROM product_codes WHERE product_id = ?";
+        $params = [(int) $product_id];
+        if ($status !== null) {
+            $sql .= " AND status = ?";
+            $params[] = $status;
+        }
+        $sql .= " ORDER BY id DESC";
+        if ($limit > 0) {
+            $sql .= " LIMIT " . (int) $limit;
+        }
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Exception $e) {
+        error_log("product_codes_list error: " . $e->getMessage());
+        return [];
+    }
+}
+
+/**
+ * Count codes for a product grouped by status.
+ * Returns ['available' => int, 'sold' => int, 'total' => int].
+ */
+function product_codes_count($product_id)
+{
+    global $pdo;
+    $out = ['available' => 0, 'sold' => 0, 'total' => 0];
+    if (!isset($pdo)) {
+        return $out;
+    }
+    try {
+        $stmt = $pdo->prepare("SELECT status, COUNT(*) c FROM product_codes WHERE product_id = ? GROUP BY status");
+        $stmt->execute([(int) $product_id]);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $st = $r['status'];
+            $c = (int) $r['c'];
+            if (isset($out[$st])) {
+                $out[$st] = $c;
+            }
+            $out['total'] += $c;
+        }
+    } catch (Exception $e) {
+        error_log("product_codes_count error: " . $e->getMessage());
+    }
+    return $out;
+}
+
+/**
+ * Bulk-add codes to a product (one code per line). De-duplicates against
+ * existing codes of the same product. Returns ['added' => int, 'skipped' => int].
+ */
+function product_codes_add_bulk($product_id, $rawText)
+{
+    global $pdo;
+    $res = ['added' => 0, 'skipped' => 0];
+    if (!isset($pdo)) {
+        return $res;
+    }
+    // Split on new lines, trim, drop empties, unique within the batch.
+    $lines = preg_split('/\r\n|\r|\n/', (string) $rawText);
+    $codes = [];
+    foreach ($lines as $ln) {
+        $ln = trim($ln);
+        if ($ln !== '') {
+            $codes[$ln] = true; // unique within batch
+        }
+    }
+    if (empty($codes)) {
+        return $res;
+    }
+    try {
+        // Fetch existing codes for this product to skip duplicates.
+        $stmt = $pdo->prepare("SELECT code FROM product_codes WHERE product_id = ?");
+        $stmt->execute([(int) $product_id]);
+        $existing = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $c) {
+            $existing[$c] = true;
+        }
+
+        $ins = $pdo->prepare(
+            "INSERT INTO product_codes (product_id, code, status, created_at)
+             VALUES (?, ?, 'available', NOW())"
+        );
+        foreach (array_keys($codes) as $code) {
+            if (isset($existing[$code])) {
+                $res['skipped']++;
+                continue;
+            }
+            $ins->execute([(int) $product_id, $code]);
+            $res['added']++;
+        }
+    } catch (Exception $e) {
+        error_log("product_codes_add_bulk error: " . $e->getMessage());
+    }
+    return $res;
+}
+
+/**
+ * Delete a single code row (only if still available, to keep sold history).
+ */
+function product_codes_delete($id, $force = false)
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return false;
+    }
+    try {
+        if ($force) {
+            $stmt = $pdo->prepare("DELETE FROM product_codes WHERE id = ?");
+            return $stmt->execute([(int) $id]);
+        }
+        $stmt = $pdo->prepare("DELETE FROM product_codes WHERE id = ? AND status = 'available'");
+        $stmt->execute([(int) $id]);
+        return $stmt->rowCount() > 0;
+    } catch (Exception $e) {
+        error_log("product_codes_delete error: " . $e->getMessage());
+        return false;
+    }
+}
+
+/**
+ * Atomically claim & deliver one available code to a buyer.
+ * Uses a transaction with row locking to avoid handing the same code twice.
+ * Returns the delivered code string, or null if none available.
+ */
+function deliver_serial_code($product_id, $buyer_id, $order_id = null)
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return null;
+    }
+    try {
+        $pdo->beginTransaction();
+        // Lock one available row so concurrent buyers can't grab the same code.
+        $sel = $pdo->prepare(
+            "SELECT id, code FROM product_codes
+             WHERE product_id = ? AND status = 'available'
+             ORDER BY id ASC LIMIT 1 FOR UPDATE"
+        );
+        $sel->execute([(int) $product_id]);
+        $row = $sel->fetch(PDO::FETCH_ASSOC);
+        if (!$row) {
+            $pdo->rollBack();
+            return null;
+        }
+        $upd = $pdo->prepare(
+            "UPDATE product_codes
+             SET status = 'sold', buyer_id = ?, order_id = ?, sold_at = NOW()
+             WHERE id = ?"
+        );
+        $upd->execute([(string) $buyer_id, $order_id, (int) $row['id']]);
+        $pdo->commit();
+        return $row['code'];
+    } catch (Exception $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log("deliver_serial_code error: " . $e->getMessage());
+        return null;
+    }
+}
+
 /**
  * Get the editable store terminology map (customer/product/service words, etc.).
  * Stored as JSON in setting.store_terminology and editable from the web panel.

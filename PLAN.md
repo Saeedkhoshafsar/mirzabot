@@ -287,12 +287,15 @@ n8n فقط یک **افزونهٔ اختیاری** خواهد بود: بعداً 
   - [x] `set_product_type()` پاک‌سازی هوشمند: حذف ردیف‌های خالی repeater، فقط ستون‌های مجاز، نرمال‌سازی bool، اعتبارسنجی select
   - [x] استایل جدول repeater + `.field-hint` در `panel/product.php`
 
-- [ ] استپ ۶ — مدیریت کد/سریال محصول (پنل + API)
-  - [ ] UI افزودن کدها به‌صورت دسته‌ای (هر خط یک کد) در فرم محصول نوع `serial_code`
-  - [ ] نمایش شمارش کدهای available/sold در لیست محصولات
-  - [ ] endpointهای CRUD کد در `api/product.php`
-  - [ ] منطق رزرو/تحویل کد آزاد هنگام خرید (آماده‌سازی تابع `deliver_serial_code()`)
-  - [ ] هشدار اتمام موجودی کد در پنل
+- [x] استپ ۶ — مدیریت کد/سریال محصول (پنل + توابع)  ✅ 2026-06-08
+  - [x] جدول `product_codes` در `table.php` (product_id, code, status=available|sold, buyer_id, order_id, sold_at) non-destructive با ایندکس روی (product_id, status)
+  - [x] UI افزودن کدها به‌صورت دسته‌ای (هر خط یک کد) در `panel/product_codes.php` با حذف تکراری‌ها
+  - [x] نمایش شمارش کدهای available/sold/total (کارت آمار) + هشدار «هیچ کد آزادی موجود نیست»
+  - [x] دکمهٔ «کدها» در لیست محصولات فقط برای نوع `serial_code` با بَج تعداد آزاد (قرمز اگر صفر)
+  - [x] توابع `product_codes_list/count/add_bulk/delete` + `deliver_serial_code()` در `function.php`
+  - [x] منطق تحویل اتمیک: `deliver_serial_code()` با تراکنش + `FOR UPDATE` تا یک کد دوبار به دو خریدار داده نشود (آمادهٔ استفاده در checkout استپ ۷)
+  - [x] حذف فقط کدهای آزاد مجاز است (تاریخچهٔ فروش حفظ می‌شود)
+  - یادداشت: مثل استپ ۴، صفحهٔ self-contained ساخته شد (الگوی کدبیس) به‌جای endpoint در `api/product.php`.
 
 - [ ] استپ ۷ — منطق خرید عمومی در ربات (Checkout) بر اساس نوع محصول
   - [ ] افزودن شاخهٔ تحویل بر اساس `product_type` در مسیر خرید `index.php`

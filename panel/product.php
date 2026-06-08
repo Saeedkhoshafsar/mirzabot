@@ -152,6 +152,14 @@ include __DIR__ . '/inc/layout_head.php';
                     title="رسانهٔ محصول">
                     <?= icon('eye', 13) ?>
                   </a>
+                  <?php if (($p['product_type'] ?? 'vpn') === 'serial_code'):
+                      $cc = product_codes_count((int) $p['id']); ?>
+                    <a href="product_codes.php?pid=<?= (int) $p['id'] ?>"
+                      class="btn <?= $cc['available'] > 0 ? 'btn-ghost' : 'btn-no' ?> btn-sm btn-icon"
+                      title="کدها / سریال (آزاد: <?= (int) $cc['available'] ?>)">
+                      <?= icon('card', 13) ?>
+                    </a>
+                  <?php endif; ?>
                   <a href="product.php?delete=<?= (int) $p['id'] ?>&_csrf=<?= csrf_token() ?>"
                     class="btn btn-no btn-sm btn-icon" title=$textbotlang['panel']['productDeleteBtn']
                     data-confirm=sprintf($textbotlang['panel']['productConfirmDeleteProduct'], $p['name_product'])>
