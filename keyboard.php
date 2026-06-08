@@ -79,6 +79,42 @@ if (
     $keyboardRows = strip_vpn_only_buttons($keyboardRows);
 }
 
+// --- Visual flow: honour main-menu buttons disabled in the flow editor -------
+// When an admin greys out a main-menu node in the flow (e.g. turns off the
+// default "خرید" to build their own), that button is hidden from the bot's main
+// menu here at render time. The DB layout is never modified; only the active
+// flow's disabled-keys list filters it. Only applies while a flow is active.
+if (!empty($keyboardRows)) {
+    if (!function_exists('flow_is_active') && is_file(__DIR__ . '/flow.php')) {
+        require_once __DIR__ . '/flow.php';
+    }
+    if (function_exists('flow_is_active') && function_exists('flow_disabled_menu_keys')
+        && flow_is_active()) {
+        $flowDisabled = flow_disabled_menu_keys();
+        if (!empty($flowDisabled)) {
+            $dropFlow = array_flip(array_map('strval', $flowDisabled));
+            $filtered = [];
+            foreach ($keyboardRows as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $kept = [];
+                foreach ($row as $btn) {
+                    $txt = is_array($btn) ? ($btn['text'] ?? '') : '';
+                    if (isset($dropFlow[$txt])) {
+                        continue; // disabled in the flow editor
+                    }
+                    $kept[] = $btn;
+                }
+                if (!empty($kept)) {
+                    $filtered[] = array_values($kept);
+                }
+            }
+            $keyboardRows = $filtered;
+        }
+    }
+}
+
 if ($setting['inlinebtnmain'] == "oninline" && !empty($keyboardRows)) {
     $trace_keyboard = $keyboardRows;
     foreach ($trace_keyboard as $key => $callback_set) {

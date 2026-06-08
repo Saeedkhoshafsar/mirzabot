@@ -293,6 +293,51 @@ $nodeTypes = flow_node_types();
             margin-top: 4px;
         }
 
+        .badge.menu { background: #2563eb; }   /* real main-menu button */
+        .badge.demo { background: #6b7280; }   /* read-only demo node */
+
+        /* Real-menu node: solid blue accent so it reads as part of the menu. */
+        .rf-node.kind-system_menu {
+            background: #1e293b;
+            border-color: #2563eb;
+            border-style: solid;
+        }
+
+        /* Demo node: muted, dashed — clearly "just a template". */
+        .rf-node.kind-system_demo {
+            background: #262b33;
+            border-color: #6b7280;
+            border-style: dashed;
+            opacity: .92;
+        }
+
+        /* Disabled (greyed) — applies to menu & demo nodes turned off. */
+        .rf-node.disabled {
+            opacity: .42;
+            filter: grayscale(1);
+        }
+
+        /* On/off switch shown on menu & demo nodes. */
+        .node-toggle {
+            display: inline-block;
+            font-size: 9px;
+            border: none;
+            border-radius: 6px;
+            padding: 1px 6px;
+            margin-top: 4px;
+            margin-inline-start: 4px;
+            cursor: pointer;
+            color: #fff;
+        }
+
+        .node-toggle.on { background: #16a34a; }
+        .node-toggle.off { background: #475569; }
+        .node-toggle.locked {
+            background: transparent;
+            cursor: default;
+            color: #94a3b8;
+        }
+
         .legend {
             position: absolute;
             bottom: 14px;
@@ -625,6 +670,11 @@ $nodeTypes = flow_node_types();
                     &nbsp; <i style="background:#a855f7"></i>اکشن</div>
                 <div><i style="background:#f59e0b"></i>ورودی &nbsp; <i style="background:#ec4899"></i>شرط
                     &nbsp; <i style="background:#06b6d4"></i>n8n</div>
+                <div style="margin-top:6px;border-top:1px solid #334155;padding-top:6px">
+                    <i style="background:#2563eb"></i>منوی اصلی واقعی (قابل روشن/خاموش + افزودن فرزند)
+                </div>
+                <div><i style="background:#6b7280"></i>نمایشی (فقط الگو — غیرقابل ویرایش)</div>
+                <div style="opacity:.6"><i style="background:#475569"></i>خاکستری = غیرفعال</div>
             </div>
         </div>
     </div>

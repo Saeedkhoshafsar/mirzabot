@@ -150,7 +150,15 @@ function flow_validate_input_file(array $cfg, $ext, $mime = '', $sizeBytes = 0)
     return ['ok' => true, 'error' => null];
 }
 
-/** A fresh, empty tree with just a protected root node (the main menu). */
+/**
+ * A fresh tree with just the protected root node.
+ *
+ * IMPORTANT: this root is a SYNTHETIC "start point" of the tree, NOT the bot's
+ * real main menu. It is the anchor every other node hangs from. Its label is
+ * deliberately explicit ("🏠 شروع ربات (ریشه)") so admins don't confuse it with
+ * the real main-menu buttons (those are imported as separate child nodes — see
+ * flow_main_menu_nodes()).
+ */
 function flow_default_tree()
 {
     return [
@@ -158,12 +166,13 @@ function flow_default_tree()
             [
                 'id'       => 'n_root',
                 'type'     => 'button',
-                'label'    => 'منوی اصلی',
+                'label'    => '🏠 شروع ربات (ریشه)',
                 'parent'   => null,
-                'system'   => true, // protected: needs confirmation to edit/delete
+                'system'   => true,    // protected: needs confirmation to edit/delete
+                'node_kind' => 'root', // synthetic anchor, not a real button
                 'position' => ['x' => 0, 'y' => 0],
                 'config'   => [
-                    'message'   => '',
+                    'message'   => 'این نقطه شروع درخت است؛ منوی واقعی ربات در فرزندان آن قرار می‌گیرد.',
                     'auto_back' => false,
                     'auto_home' => false,
                 ],
@@ -176,6 +185,232 @@ function flow_default_tree()
             'updated_at' => date('Y-m-d H:i:s'),
         ],
     ];
+}
+
+/**
+ * Map of the bot's real main-menu symbolic keys to their callback + a flag for
+ * whether the feature can be toggled on/off. These keys live in the
+ * `keyboardmain` setting (e.g. text_sell, text_support). At render time
+ * keyboard.php resolves the key to a label (bot_label) and the callback to the
+ * hard-coded bot logic. We mirror that mapping here so the flow editor can show
+ * each menu button as a node, grey out disabled ones, and (for the main level)
+ * let admins attach their own child nodes.
+ *
+ * 'toggle' => the matching bot feature has an enable/disable switch, so the
+ * node may be greyed/hidden without breaking anything.
+ */
+function flow_main_menu_map()
+{
+    return [
+        'text_sell'               => ['cb' => 'buy',          'lang' => 'sell',              'toggle' => true],
+        'text_Purchased_services' => ['cb' => 'backorder',    'lang' => 'purchasedServices', 'toggle' => false],
+        'accountwallet'           => ['cb' => 'account',      'lang' => 'accountWallet',     'toggle' => false],
+        'text_Tariff_list'        => ['cb' => 'Tariff_list',  'lang' => 'tariffList',        'toggle' => true],
+        'text_affiliates'         => ['cb' => 'affiliatesbtn', 'lang' => 'affiliates',       'toggle' => true],
+        'text_support'            => ['cb' => 'supportbtns',  'lang' => 'support',           'toggle' => false],
+        'text_help'               => ['cb' => 'helpbtns',     'lang' => 'help',              'toggle' => false],
+        'text_usertest'           => ['cb' => 'usertestbtn',  'lang' => 'userTest',          'toggle' => true],
+        'text_wheel_luck'         => ['cb' => 'wheel_luck',   'lang' => 'wheelLuck',         'toggle' => true],
+        'text_extend'             => ['cb' => 'extendbtn',    'lang' => 'extend',            'toggle' => true],
+    ];
+}
+
+/**
+ * Resolve a symbolic main-menu key to a human label, using the same overrides
+ * (bot_label) and lang fallbacks keyboard.php uses, so the flow shows exactly
+ * what the user sees in Telegram.
+ */
+function flow_resolve_menu_label($key, $langKey = null)
+{
+    static $textbotlang = null;
+    if ($textbotlang === null) {
+        $textbotlang = function_exists('languagechange') ? languagechange() : [];
+    }
+    $fallback = $textbotlang['textbot'][$langKey] ?? $key;
+    if ($langKey && function_exists('bot_label')) {
+        return bot_label($langKey, null, $fallback);
+    }
+    return $fallback;
+}
+
+/**
+ * Read the bot's real main menu (keyboardmain) and return it as flow nodes —
+ * one node per button, parented to n_root, marked node_kind=system_menu so the
+ * editor renders them as protected (no label edit / delete) but still allows
+ * toggling on/off and attaching custom children.
+ *
+ * Returns ['nodes'=>[...], 'edges'=>[...]] ready to merge into a tree. The y
+ * offset lets the caller stack these below any other imported nodes.
+ *
+ * @param array $disabled  list of menu keys currently disabled (greyed)
+ */
+function flow_main_menu_nodes(array $disabled = [], $startY = 0)
+{
+    global $setting;
+    $rows = null;
+    if (is_array($setting) && !empty($setting['keyboardmain'])) {
+        $rows = json_decode($setting['keyboardmain'], true);
+    }
+    if (!$rows && function_exists('select')) {
+        $kb = select('setting', 'keyboardmain', null, null, 'FETCH_COLUMN');
+        if (is_array($kb)) {
+            $kb = $kb[0] ?? null;
+        }
+        $rows = $kb ? json_decode($kb, true) : null;
+    }
+    if (!is_array($rows) || empty($rows['keyboard']) || !is_array($rows['keyboard'])) {
+        // no stored layout → fall back to the factory default for the mode
+        $mode = function_exists('panel_mode') ? panel_mode() : 'vpn';
+        $rows = function_exists('default_main_keyboard_json')
+            ? json_decode(default_main_keyboard_json($mode), true)
+            : null;
+    }
+    $out = ['nodes' => [], 'edges' => []];
+    if (!is_array($rows) || empty($rows['keyboard'])) {
+        return $out;
+    }
+    $map = flow_main_menu_map();
+    $disabledFlip = array_flip(array_map('strval', $disabled));
+    $x = 240;
+    $y = $startY;
+    foreach ($rows['keyboard'] as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        foreach ($row as $btn) {
+            $key = is_array($btn) ? ($btn['text'] ?? '') : '';
+            if ($key === '') {
+                continue;
+            }
+            $info  = $map[$key] ?? null;
+            $label = $info ? flow_resolve_menu_label($key, $info['lang']) : $key;
+            $id    = 'n_menu_' . substr(md5($key), 0, 8);
+            $out['nodes'][] = [
+                'id'        => $id,
+                'type'      => 'button',
+                'label'     => $label,
+                'parent'    => 'n_root',
+                'system'    => true,
+                'node_kind' => 'system_menu',
+                'menu_key'  => $key,
+                'disabled'  => isset($disabledFlip[$key]),
+                'can_toggle' => $info ? (bool) $info['toggle'] : true,
+                'position'  => ['x' => $x, 'y' => $y],
+                'config'    => [
+                    'message'   => '',
+                    'callback'  => $info['cb'] ?? '',
+                    'auto_back' => false,
+                    'auto_home' => false,
+                ],
+            ];
+            $out['edges'][] = [
+                'id'     => 'e_root_' . $id,
+                'source' => 'n_root',
+                'target' => $id,
+            ];
+            $y += 90;
+        }
+    }
+    return $out;
+}
+
+/**
+ * Get / set the list of main-menu keys the admin has disabled from the flow
+ * editor. Stored in the flow tree's meta so it travels with the tree and is
+ * applied at render time by keyboard.php (greys out + hides the button) without
+ * touching the bot's core logic.
+ */
+function flow_disabled_menu_keys($bot_id = null)
+{
+    $tree = get_button_flow($bot_id);
+    $keys = $tree['meta']['disabled_menu_keys'] ?? [];
+    return is_array($keys) ? array_values(array_map('strval', $keys)) : [];
+}
+
+/**
+ * Build READ-ONLY "demo" nodes that mirror the bot's deep, hard-coded nested
+ * menus (admin panel and its children) so the admin sees the whole structure as
+ * a tree — purely as a mental model / template. These nodes are node_kind=
+ * 'system_demo': they can't be edited, deleted, or given children, and they
+ * don't drive the bot. They are only shown so the admin understands the layout
+ * and can copy its parent/child pattern when building their own flow.
+ *
+ * We intentionally model just the top admin menu (it's the deepest example the
+ * user asked about). Each child is its own demo node so the tree shows real
+ * parent→child relationships. Labels come from the lang file so they match what
+ * the admin sees in Telegram.
+ *
+ * @return array ['nodes'=>[...], 'edges'=>[...]]
+ */
+function flow_demo_submenu_nodes($startY = 0)
+{
+    $lang = function_exists('languagechange') ? languagechange() : [];
+    $L = function ($path, $fallback) use ($lang) {
+        $ref = $lang;
+        foreach (explode('.', $path) as $k) {
+            if (!is_array($ref) || !isset($ref[$k])) {
+                return $fallback;
+            }
+            $ref = $ref[$k];
+        }
+        return is_string($ref) ? $ref : $fallback;
+    };
+
+    $out = ['nodes' => [], 'edges' => []];
+
+    // Parent demo node: "پنل مدیریت" (admin panel). It hangs off the root as a
+    // sibling of the real main-menu buttons, clearly flagged as a demo.
+    $adminId = 'n_demo_admin';
+    $out['nodes'][] = [
+        'id'        => $adminId,
+        'type'      => 'button',
+        'label'     => $L('Admin.btnKeyboard.adminPanel', '👨‍💼 پنل مدیریت'),
+        'parent'    => 'n_root',
+        'system'    => true,
+        'node_kind' => 'system_demo',
+        'disabled'  => false,
+        'can_toggle' => false, // admin panel can't be turned off
+        'position'  => ['x' => 720, 'y' => $startY],
+        'config'    => ['message' => '', 'auto_back' => false, 'auto_home' => false],
+    ];
+    $out['edges'][] = ['id' => 'e_root_' . $adminId, 'source' => 'n_root', 'target' => $adminId];
+
+    // Children of the admin panel (the real keyboardadmin layout, administrator
+    // role). Each becomes a leaf demo node.
+    $children = [
+        ['Admin.Status.btn',                  '📊 وضعیت ربات'],
+        ['Admin.btnKeyboard.managementPanel', '🗂 مدیریت پنل‌ها'],
+        ['Admin.btnKeyboard.addPanel',        '➕ افزودن پنل'],
+        ['Admin.btnKeyboard.manageUser',      '👥 مدیریت کاربران'],
+        ['keyboard.shopSettings',             '🛒 تنظیمات فروشگاه'],
+        ['keyboard.financial',                '💰 مالی'],
+        ['keyboard.supportSection',           '🛟 بخش پشتیبانی'],
+        ['keyboard.educationSection',         '🎓 بخش آموزش'],
+        ['keyboard.botReport',                '📈 گزارش ربات'],
+        ['keyboard.panelFeatures',            '⚙️ امکانات پنل'],
+        ['keyboard.generalSettings',          '🔧 تنظیمات عمومی'],
+        ['keyboard.pendingReceipts',          '🧾 رسیدهای در انتظار'],
+    ];
+    $cy = $startY;
+    foreach ($children as $i => $c) {
+        $id = 'n_demo_adm_' . $i;
+        $out['nodes'][] = [
+            'id'        => $id,
+            'type'      => 'button',
+            'label'     => $L($c[0], $c[1]),
+            'parent'    => $adminId,
+            'system'    => true,
+            'node_kind' => 'system_demo',
+            'disabled'  => false,
+            'can_toggle' => false,
+            'position'  => ['x' => 960, 'y' => $cy],
+            'config'    => ['message' => '', 'auto_back' => false, 'auto_home' => false],
+        ];
+        $out['edges'][] = ['id' => 'e_' . $adminId . '_' . $id, 'source' => $adminId, 'target' => $id];
+        $cy += 80;
+    }
+
+    return $out;
 }
 
 /** Resolve which bot scope we are operating on (0 = main bot). */
@@ -333,6 +568,23 @@ function flow_normalise_tree($raw)
             ],
             'config'   => flow_normalise_config(is_array($n['config'] ?? null) ? $n['config'] : [], $type),
         ];
+        // Preserve system-menu metadata (real main menu / demo nodes) so the
+        // editor can render them correctly and keyboard.php can honour toggles.
+        if (!empty($n['node_kind'])) {
+            $kind = (string) $n['node_kind'];
+            if (in_array($kind, ['root', 'system_menu', 'system_demo', 'user'], true)) {
+                $node['node_kind'] = $kind;
+            }
+        }
+        if (isset($n['menu_key']) && $n['menu_key'] !== '') {
+            $node['menu_key'] = (string) $n['menu_key'];
+        }
+        if (array_key_exists('disabled', $n)) {
+            $node['disabled'] = !empty($n['disabled']);
+        }
+        if (array_key_exists('can_toggle', $n)) {
+            $node['can_toggle'] = !empty($n['can_toggle']);
+        }
         $nodes[] = $node;
         $byId[$id] = count($nodes) - 1;
     }
@@ -404,13 +656,26 @@ function flow_normalise_tree($raw)
         $nodes[$i]['config']['branches'] = $branches;
     }
 
+    // Derive the disabled main-menu keys from the system_menu nodes themselves,
+    // so the flag and the node always agree (the node's grey state is the single
+    // source of truth). keyboard.php reads this list at render time.
+    $disabledKeys = [];
+    foreach ($nodes as $n) {
+        if (($n['node_kind'] ?? '') === 'system_menu'
+            && !empty($n['disabled'])
+            && !empty($n['menu_key'])) {
+            $disabledKeys[] = (string) $n['menu_key'];
+        }
+    }
+
     return [
         'nodes' => $nodes,
         'edges' => $edges,
         'meta'  => [
-            'root'       => $rootId,
-            'version'    => (int) ($raw['meta']['version'] ?? 1),
-            'updated_at' => (string) ($raw['meta']['updated_at'] ?? date('Y-m-d H:i:s')),
+            'root'               => $rootId,
+            'version'            => (int) ($raw['meta']['version'] ?? 1),
+            'updated_at'         => (string) ($raw['meta']['updated_at'] ?? date('Y-m-d H:i:s')),
+            'disabled_menu_keys' => array_values(array_unique($disabledKeys)),
         ],
     ];
 }
@@ -431,6 +696,12 @@ function flow_normalise_config(array $c, $type)
     // button list on save. Empty for native flow nodes.
     if (!empty($c['legacy_id'])) {
         $out['legacy_id'] = (string) $c['legacy_id'];
+    }
+    // Built-in callback a system_menu node maps to (e.g. "buy", "supportbtns").
+    // Read-only mirror of the bot's hard-coded action; kept so the runtime/editor
+    // know which feature this node represents. Empty for user/native nodes.
+    if (!empty($c['callback'])) {
+        $out['callback'] = (string) $c['callback'];
     }
     if (!empty($out['url']) && !preg_match('~^https?://~i', $out['url'])) {
         $out['url'] = '';
@@ -986,12 +1257,40 @@ function flow_build_from_legacy($bot_id = null)
             require_once __DIR__ . '/automation.php';
         }
     }
+    // --- Real main menu (keyboardmain) -------------------------------------
+    // Import the bot's actual main-menu buttons (خرید، پشتیبانی، آموزش، ...) as
+    // protected system nodes under the root, so the admin sees the WHOLE menu as
+    // a tree (not just the automation custom buttons). These can be toggled
+    // on/off and given custom children, but their label can't be edited/deleted.
+    $menu = flow_main_menu_nodes([], 0);
+    foreach ($menu['nodes'] as $mn) {
+        $tree['nodes'][] = $mn;
+    }
+    foreach ($menu['edges'] as $me) {
+        $tree['edges'][] = $me;
+    }
+
+    // --- Demo nodes (read-only template of the deep admin menu) -------------
+    // Mirror the bot's nested admin menu so the admin sees the whole structure
+    // as a tree. These are template-only and never drive the bot.
+    $demo = flow_demo_submenu_nodes((count($menu['nodes']) * 90) + 60);
+    foreach ($demo['nodes'] as $dn) {
+        $tree['nodes'][] = $dn;
+    }
+    foreach ($demo['edges'] as $de) {
+        $tree['edges'][] = $de;
+    }
+
+    // Place automation custom buttons to the right of the menu column so they
+    // don't overlap (the auto-layout in the editor re-arranges anyway).
+    $startY = ((count($menu['nodes']) + count($demo['nodes'])) * 90) + 180;
+
     if (!function_exists('automation_buttons')) {
-        return $tree;
+        return flow_normalise_tree($tree);
     }
     $legacy = automation_buttons($bot_id);
-    $x = 240;
-    $y = 0;
+    $x = 480;
+    $y = $startY;
     foreach ($legacy as $b) {
         $id = 'n_' . substr(md5($b['id'] . microtime() . $b['label']), 0, 8);
         $type = ($b['url'] !== '' && $b['message'] === '' && $b['event'] === '') ? 'button' : 'message';
@@ -1006,13 +1305,14 @@ function flow_build_from_legacy($bot_id = null)
         // save (otherwise the bot would keep showing the old legacy button).
         $cfg['legacy_id'] = (string) $b['id'];
         $tree['nodes'][] = [
-            'id'       => $id,
-            'type'     => $type,
-            'label'    => $b['label'],
-            'parent'   => 'n_root',
-            'system'   => false,
-            'position' => ['x' => $x, 'y' => $y],
-            'config'   => $cfg,
+            'id'        => $id,
+            'type'      => $type,
+            'label'     => $b['label'],
+            'parent'    => 'n_root',
+            'system'    => false,
+            'node_kind' => 'user',
+            'position'  => ['x' => $x, 'y' => $y],
+            'config'    => $cfg,
         ];
         $tree['edges'][] = [
             'id'     => 'e_root_' . $id,

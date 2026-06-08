@@ -62,7 +62,16 @@
       return {
         id: n.id,
         position: { x: (n.position && n.position.x) || 0, y: (n.position && n.position.y) || 0 },
-        data: { label: n.label, type: n.type, system: !!n.system, config: n.config || {} },
+        data: {
+          label: n.label,
+          type: n.type,
+          system: !!n.system,
+          node_kind: n.node_kind || (n.system ? 'root' : 'user'),
+          menu_key: n.menu_key || '',
+          disabled: !!n.disabled,
+          can_toggle: n.can_toggle !== undefined ? !!n.can_toggle : false,
+          config: n.config || {}
+        },
         type: 'flowNode'
       };
     });
@@ -83,15 +92,25 @@
     var parentOf = {};
     rfEdges.forEach(function (e) { parentOf[e.target] = e.source; });
     var nodes = rfNodes.map(function (n) {
-      return {
+      var d = n.data || {};
+      var node = {
         id: n.id,
-        type: (n.data && n.data.type) || 'button',
-        label: (n.data && n.data.label) || '',
+        type: d.type || 'button',
+        label: d.label || '',
         parent: parentOf[n.id] || null,
-        system: !!(n.data && n.data.system),
+        system: !!d.system,
         position: { x: Math.round(n.position.x), y: Math.round(n.position.y) },
-        config: (n.data && n.data.config) || {}
+        config: d.config || {}
       };
+      // Carry system-menu metadata back so the server can persist toggles and
+      // tell apart real-menu nodes from user nodes.
+      if (d.node_kind) { node.node_kind = d.node_kind; }
+      if (d.menu_key) { node.menu_key = d.menu_key; }
+      if (d.node_kind === 'system_menu') {
+        node.disabled = !!d.disabled;
+        node.can_toggle = !!d.can_toggle;
+      }
+      return node;
     });
     var edges = rfEdges.map(function (e) {
       return { id: e.id, source: e.source, target: e.target };
@@ -219,12 +238,41 @@
   // ---- Custom node renderer ------------------------------------------------
   function FlowNode(props) {
     var d = props.data || {};
-    var cls = 'rf-node t-' + (d.type || 'button') + (d.system ? ' system' : '') + (props.selected ? ' selected' : '');
+    var kind = d.node_kind || (d.system ? 'root' : 'user');
+    var isMenu = kind === 'system_menu';
+    var isDemo = kind === 'system_demo';
+    var isRoot = kind === 'root';
+    var cls = 'rf-node t-' + (d.type || 'button')
+      + (d.system ? ' system' : '')
+      + (' kind-' + kind)
+      + (d.disabled ? ' disabled' : '')
+      + (props.selected ? ' selected' : '');
+
+    // Badge text per node kind so the admin instantly knows what they can do.
+    var badge = null;
+    if (isRoot) badge = h('span', { className: 'badge' }, 'ریشه');
+    else if (isMenu) badge = h('span', { className: 'badge menu' }, 'منوی اصلی');
+    else if (isDemo) badge = h('span', { className: 'badge demo' }, 'نمایشی');
+
+    // On/off toggle for menu (and demo, when togglable) nodes. Stops propagation
+    // so clicking the switch doesn't open the side form.
+    var toggle = null;
+    if ((isMenu || isDemo) && d.can_toggle && typeof d.onToggle === 'function') {
+      toggle = h('button', {
+        className: 'node-toggle ' + (d.disabled ? 'off' : 'on'),
+        title: d.disabled ? 'فعال‌سازی' : 'غیرفعال‌سازی',
+        onClick: function (e) { e.stopPropagation(); d.onToggle(props.id); }
+      }, d.disabled ? 'خاموش' : 'روشن');
+    } else if ((isMenu || isDemo) && !d.can_toggle) {
+      toggle = h('span', { className: 'node-toggle locked', title: 'این مورد قابل خاموش‌کردن نیست' }, '🔒');
+    }
+
     return h('div', { className: cls },
       h(RF.Handle, { type: 'target', position: RF.Position.Top, style: { background: '#94a3b8' } }),
       h('div', { className: 'nt' }, TYPE_LABELS[d.type] || d.type),
       h('div', { className: 'nl' }, d.label || '(بدون نام)'),
-      d.system ? h('span', { className: 'badge' }, 'سیستمی') : null,
+      badge,
+      toggle,
       h(RF.Handle, { type: 'source', position: RF.Position.Bottom, style: { background: '#94a3b8' } })
     );
   }
@@ -760,6 +808,13 @@
     var onConnect = useCallback(function (params) {
       var source = params.source, target = params.target;
       if (!source || !target || source === target) return;
+      // Demo nodes mirror the bot's internal nested menus (read-only); you can't
+      // hang your own children off them, only off real-menu or user nodes.
+      var srcNode = nodes.find(function (n) { return n.id === source; });
+      if (srcNode && srcNode.data && srcNode.data.node_kind === 'system_demo') {
+        setStatus('error', 'نودهای نمایشی فقط الگو هستند؛ نمی‌توان به آن‌ها فرزند افزود.');
+        return;
+      }
       // target must not already have a parent (single-parent tree)
       var hasParent = edges.some(function (e) { return e.target === target; });
       if (hasParent) {
@@ -789,6 +844,26 @@
       setStatus('dirty', 'پیوند قطع شد (نود حذف نشد)');
     }, [nodes, edges, setEdges, markDirty, pushUndo]);
 
+    // ---- toggle a system-menu / demo node on/off (grey it out) -------------
+    // Flips data.disabled on the node. On save, the server derives the bot's
+    // disabled-keys list from these flags, so a greyed node disappears from the
+    // bot's real menu without touching its label or core logic.
+    var toggleMenuNode = useCallback(function (nodeId) {
+      pushUndo(nodes, edges);
+      var nowOff = false;
+      setNodes(function (ns) {
+        return ns.map(function (n) {
+          if (n.id !== nodeId) return n;
+          var d = n.data || {};
+          if (!d.can_toggle) return n; // protected (e.g. wallet, support)
+          nowOff = !d.disabled;
+          return Object.assign({}, n, { data: Object.assign({}, d, { disabled: nowOff }) });
+        });
+      });
+      markDirty();
+      setStatus('dirty', nowOff ? 'این مورد غیرفعال شد (خاکستری)' : 'این مورد دوباره فعال شد');
+    }, [nodes, edges, setNodes, markDirty, pushUndo]);
+
     // ---- drag from a port and drop on empty canvas -> create child ----
     var onConnectStart = useCallback(function (_evt, params) {
       connectStart.current = (params && params.handleType === 'source') ? params.nodeId : null;
@@ -798,6 +873,12 @@
       var sourceId = connectStart.current;
       connectStart.current = null;
       if (!sourceId) return;
+      // Demo nodes are read-only mirrors; block creating children from them.
+      var srcN = nodes.find(function (n) { return n.id === sourceId; });
+      if (srcN && srcN.data && srcN.data.node_kind === 'system_demo') {
+        setStatus('error', 'نودهای نمایشی فقط الگو هستند؛ نمی‌توان به آن‌ها فرزند افزود.');
+        return;
+      }
       var targetIsPane = evt.target && evt.target.classList &&
         evt.target.classList.contains('react-flow__pane');
       if (!targetIsPane) return; // dropped on a node/handle -> onConnect handles it
@@ -818,18 +899,33 @@
         open: true, isNew: true, pendingParent: sourceId, dropPos: pos,
         draft: { type: 'button', label: '', system: false, config: defaultConfigFor('button') }
       });
-    }, []);
+    }, [nodes]);
 
     // ---- double-click a node -> edit ----
     var onNodeDoubleClick = useCallback(function (_evt, node) {
+      var nd = node.data || {};
+      var kind = nd.node_kind || (nd.system ? 'root' : 'user');
+      // Real-menu and demo nodes mirror the bot's built-in logic; their label
+      // can't be edited and they can't be deleted. The admin CAN: toggle them
+      // on/off (the switch on the node) and drag a new child from their bottom
+      // port. So we don't open the edit form for them — we explain instead.
+      if (kind === 'system_menu') {
+        alert('این دکمهٔ «منوی اصلی» ربات است.\n\n• روشن/خاموش: از کلید روی خودِ نود.\n• افزودن فرزند: از نقطهٔ پایین نود یک پیوند بکشید.\n\nبرچسب و رفتار اصلی آن قابل ویرایش نیست (به منطق ربات وصل است).');
+        return;
+      }
+      if (kind === 'system_demo') {
+        alert('این یک نود «نمایشی» از منوی داخلی ربات است (فقط برای الگو و ذهنیت).\n\nقابل ویرایش/حذف نیست و نمی‌توان به آن فرزند افزود. اگر قابل خاموش‌کردن باشد، کلید روشن/خاموش روی آن فعال است.');
+        return;
+      }
       setPanel({
         open: true, isNew: false, pendingParent: null, dropPos: null,
         draft: {
           id: node.id,
-          type: (node.data && node.data.type) || 'button',
-          label: (node.data && node.data.label) || '',
-          system: !!(node.data && node.data.system),
-          config: Object.assign({}, (node.data && node.data.config) || {})
+          type: nd.type || 'button',
+          label: nd.label || '',
+          system: !!nd.system,
+          node_kind: kind,
+          config: Object.assign({}, nd.config || {})
         }
       });
     }, []);
@@ -1182,9 +1278,19 @@
         data: Object.assign({}, e.data, { onCut: cutEdge })
       });
     });
+    // Inject the on/off handler into menu/demo nodes so their toggle works.
+    var nodesWithHandlers = nodes.map(function (n) {
+      var k = n.data && n.data.node_kind;
+      if (k === 'system_menu' || k === 'system_demo') {
+        return Object.assign({}, n, {
+          data: Object.assign({}, n.data, { onToggle: toggleMenuNode })
+        });
+      }
+      return n;
+    });
     var canvas = h('div', { ref: wrapRef, style: { position: 'absolute', inset: 0 } },
       h(RF.ReactFlow, {
-        nodes: nodes,
+        nodes: nodesWithHandlers,
         edges: edgesWithCut,
         onInit: function (inst) { rfInstance.current = inst; },
         onNodesChange: handleNodesChange,
