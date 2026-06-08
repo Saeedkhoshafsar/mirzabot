@@ -163,6 +163,24 @@ if ($setting['inlinebtnmain'] == "oninline" && !empty($keyboardRows)) {
     $keyboardcustom = $keyboardRows;
     $keyboardcustom = json_decode(strtr(strval(json_encode($keyboardcustom)), $replacements), true);
     $keyboardcustom[] = $temp_addtional_key;
+    // --- Custom automation buttons on the REPLY keyboard too ---
+    // Previously custom buttons were only appended to the inline keyboard, so a
+    // bot running in reply-keyboard mode never showed admin-defined buttons
+    // (admin saw "saved" in the panel but nothing appeared in the bot). A reply
+    // keyboard can't carry callback_data/url, so each custom button is added as a
+    // plain text row; the text handler (see index.php) maps the label back to the
+    // button to fire its message/event.
+    if (function_exists('automation_buttons') || is_file(__DIR__ . '/automation.php')) {
+        if (!function_exists('automation_buttons')) {
+            require_once __DIR__ . '/automation.php';
+        }
+        foreach (automation_buttons() as $cb) {
+            if (!$cb['active'] || $cb['label'] === '') {
+                continue;
+            }
+            $keyboardcustom[] = [['text' => $cb['label']]];
+        }
+    }
     $keyboard['keyboard'] = $keyboardcustom;
     $keyboard = json_encode($keyboard);
 }
