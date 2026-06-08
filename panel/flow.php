@@ -565,6 +565,61 @@ $nodeTypes = flow_node_types();
             line-height: 1.7;
         }
 
+        /* ---- Per-type friendly guide block ---- */
+        .type-guide {
+            background: linear-gradient(180deg, rgba(37, 99, 235, .14), rgba(37, 99, 235, .05));
+            border: 1px solid rgba(59, 130, 246, .45);
+            border-radius: 10px;
+            padding: 10px 12px;
+            margin-bottom: 14px;
+            line-height: 1.75;
+        }
+        .type-guide .tg-h {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            font-size: 13px;
+            font-weight: 800;
+            color: #bfdbfe;
+            margin-bottom: 5px;
+        }
+        .type-guide .tg-h .tg-ico { font-size: 16px; }
+        .type-guide .tg-desc { font-size: 12px; color: #dbeafe; }
+        .type-guide .tg-ex {
+            margin-top: 7px;
+            background: rgba(2, 6, 23, .45);
+            border: 1px dashed rgba(148, 163, 184, .4);
+            border-radius: 8px;
+            padding: 6px 9px;
+            font-size: 11.5px;
+            color: #cbd5e1;
+        }
+        .type-guide .tg-ex b { color: #93c5fd; }
+
+        /* ---- Preset / template chips ---- */
+        .preset-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 7px;
+            margin-bottom: 10px;
+        }
+        .preset-btn {
+            border: 1px solid #3b82f6;
+            background: rgba(37, 99, 235, .16);
+            color: #dbeafe;
+            border-radius: 999px;
+            padding: 6px 12px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: filter .12s;
+        }
+        .preset-btn:hover { filter: brightness(1.25); }
+        .preset-hint {
+            font-size: 11px;
+            color: #94a3b8;
+            margin-bottom: 8px;
+        }
+
         .toolbar-tip {
             position: absolute;
             top: 14px;

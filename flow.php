@@ -705,6 +705,28 @@ function flow_normalise_config(array $c, $type)
         // reply for that button (e.g. the «اشتراک‌های خریداری‌شده…» block). Has no
         // effect on plain user nodes. Default false → native behaviour preserved.
         'suppress_native' => !empty($c['suppress_native']),
+        // How this node's child buttons are arranged into keyboard rows.
+        //   ''        → auto: each button on its own row (legacy behaviour)
+        //   'N' (1-8) → N buttons per row (e.g. '2' = two columns)
+        //   'a,b,c'   → custom: row1 has a buttons, row2 b, row3 c… (1-8 each)
+        // Normalised to a clean string; anything invalid falls back to '' (auto).
+        'child_layout' => (function ($v) {
+            $v = is_string($v) ? trim($v) : (is_int($v) ? (string) $v : '');
+            if ($v === '' || $v === 'auto') {
+                return '';
+            }
+            // Single integer N → N per row.
+            if (preg_match('/^\d+$/', $v)) {
+                $n = (int) $v;
+                return ($n >= 1 && $n <= 8) ? (string) $n : '';
+            }
+            // Custom CSV like "2,1,3": keep only 1..8 ints, drop the rest.
+            $parts = array_filter(array_map(function ($p) {
+                $p = (int) trim($p);
+                return ($p >= 1 && $p <= 8) ? $p : 0;
+            }, explode(',', $v)));
+            return $parts ? implode(',', $parts) : '';
+        })($c['child_layout'] ?? ''),
     ];
     // Link back to a legacy automation custom button (set during migration). Kept
     // through every normalise so the panel can sync edits/deletes to the legacy

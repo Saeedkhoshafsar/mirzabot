@@ -177,15 +177,15 @@ include __DIR__ . '/inc/layout_head.php';
         </div>
     </div>
 
-    <!-- Custom buttons moved to keyboard.php ---------------------------- -->
+    <!-- Custom buttons are managed in the visual flow editor now --------- -->
     <div class="card fade-up d3" style="margin-bottom:16px">
         <div class="card-head"><div><div class="card-title">دکمه‌های سفارشی ربات</div>
-            <div class="card-subtitle">ساخت و ویرایش دکمه‌های دلخواه ربات به صفحهٔ «چیدمان کیبورد» منتقل شد</div></div></div>
+            <div class="card-subtitle">ساخت و ویرایش دکمه‌های دلخواه ربات به «ویرایشگر دکمه‌ها (درختی)» منتقل شد</div></div></div>
         <div class="card-body">
             <div class="notice" style="margin-bottom:0">
                 برای افزودن یا ویرایش دکمه‌های دلخواه ربات (پیام، لینک یا رویداد n8n) به
-                <a href="keyboard.php#custom-buttons" style="font-weight:700">صفحهٔ چیدمان کیبورد</a> بروید.
-                هر دکمهٔ فعال هنگام کلیک، رویداد <code>custom.trigger</code> را برای n8n ارسال می‌کند.
+                <a href="flow.php" style="font-weight:700">ویرایشگر دکمه‌ها (درختی)</a> بروید و یک نود جدید بسازید.
+                نود از نوع n8n هنگام کلیک، رویداد دلخواه شما را برای n8n ارسال می‌کند.
             </div>
         </div>
     </div>

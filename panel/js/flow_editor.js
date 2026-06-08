@@ -32,6 +32,124 @@
   // Types the admin may create via the UI (root/system "button" still allowed).
   var CREATABLE_TYPES = ['button', 'message', 'action', 'input', 'condition', 'n8n'];
 
+  // ---- Friendly per-type guide -------------------------------------------
+  // Plain-language explanation + a real example for each node type, shown at
+  // the top of the form so non-technical admins understand what they're
+  // building. Keep this simple and example-driven.
+  var TYPE_GUIDE = {
+    button: {
+      icon: '🔘', title: 'دکمه (منوی فرزند)',
+      desc: 'یک دکمه که وقتی کاربر آن را می‌زند، دکمه‌های زیرمجموعهٔ آن (فرزندان) را نشان می‌دهد. مثل یک پوشه در منو.',
+      ex: 'مثال: دکمهٔ «خرید سرویس» که با زدن آن، دکمه‌های «یک‌ماهه»، «سه‌ماهه» و «بازگشت» ظاهر می‌شوند.'
+    },
+    message: {
+      icon: '💬', title: 'پیام (نمایش متن)',
+      desc: 'فقط یک متن به کاربر نشان می‌دهد. برای راهنما، قوانین، توضیحات یا پیام خوش‌آمد مناسب است.',
+      ex: 'مثال: «برای پشتیبانی به آیدی @support پیام دهید. ساعت پاسخگویی ۹ تا ۲۱.»'
+    },
+    action: {
+      icon: '⚙️', title: 'اکشن (عملیات داخلی)',
+      desc: 'یک کار آمادهٔ داخل ربات را اجرا می‌کند (مثل باز کردن صفحهٔ خرید یا حساب کاربری). برای وقتی است که می‌خواهید کاربر را به یکی از بخش‌های اصلی خود ربات وصل کنید.',
+      ex: 'مثال: دکمهٔ «کیف پول من» که اکشن «account» را اجرا می‌کند و موجودی کاربر را نشان می‌دهد.'
+    },
+    input: {
+      icon: '📥', title: 'ورودی (دریافت از کاربر)',
+      desc: 'از کاربر چیزی می‌گیرد (متن، عکس یا فایل) و آن را ذخیره می‌کند تا در مراحل بعد استفاده شود.',
+      ex: 'مثال: «لطفاً کد تخفیف خود را بفرستید» — کاربر کد را می‌نویسد و شما بعداً آن را بررسی می‌کنید.'
+    },
+    condition: {
+      icon: '🔀', title: 'شرط (دو راهی)',
+      desc: 'بسته به چیزی که کاربر فرستاده، او را به مسیرهای مختلف می‌فرستد. مثل یک چنگال در جاده: «اگر این بود برو راست، وگرنه برو چپ.»',
+      ex: 'مثال: کاربر یک کد فرستاده؛ «اگر کد = OFF50 بود» → برو به شاخهٔ تخفیف، «در غیر این صورت» → برو به شاخهٔ خطا.'
+    },
+    n8n: {
+      icon: '🔌', title: 'n8n (اتصال به سرویس بیرونی)',
+      desc: 'اطلاعات کاربر را به یک سرویس بیرونی (n8n) می‌فرستد تا کاری انجام دهد — مثل ثبت در گوگل‌شیت، ارسال ایمیل یا بررسی پرداخت. اگر n8n ندارید، فعلاً لازمش ندارید.',
+      ex: 'مثال: بعد از اینکه کاربر رسید پرداخت را فرستاد، آن را به n8n می‌فرستیم تا خودکار بررسی و تأیید شود.'
+    }
+  };
+
+  // ---- Ready-made templates (presets) for the hard node types ------------
+  // Each preset returns a config object that fully fills the form so the
+  // admin only tweaks the wording. This addresses "filling fields is
+  // exhausting — give me examples I can pick".
+  var INPUT_PRESETS = [
+    {
+      name: '🎟️ کد تخفیف',
+      cfg: {
+        message: '', input_mode: 'text', input_tag: 'discount_code',
+        prompt: 'لطفاً کد تخفیف خود را بفرستید:', force_reply: true,
+        input_validation: 'length', input_min: 3, input_max: 24,
+        sanitize_text: true, max_attempts: 5, attempt_window_sec: 0,
+        error_message: 'کد نامعتبر است. دوباره تلاش کنید.'
+      }
+    },
+    {
+      name: '📱 شمارهٔ موبایل',
+      cfg: {
+        message: '', input_mode: 'text', input_tag: 'phone',
+        prompt: 'شمارهٔ موبایل خود را وارد کنید (مثل 09123456789):', force_reply: true,
+        input_validation: 'regex', input_pattern: '^09\\d{9}$',
+        input_min: 0, input_max: 0, sanitize_text: true,
+        max_attempts: 5, attempt_window_sec: 0,
+        error_message: 'شمارهٔ موبایل معتبر نیست. مثال درست: 09123456789'
+      }
+    },
+    {
+      name: '🧾 رسید پرداخت (عکس)',
+      cfg: {
+        message: '', input_mode: 'photo', input_tag: 'receipt',
+        prompt: 'لطفاً عکس رسید پرداخت خود را ارسال کنید:', force_reply: true,
+        file_max_mb: 5, file_max_count: 1, verify_mime: true,
+        file_extensions: ['jpg', 'png'], max_attempts: 5, attempt_window_sec: 0,
+        error_message: 'فقط عکس رسید را بفرستید.'
+      }
+    },
+    {
+      name: '✉️ متن آزاد (پیام/نظر)',
+      cfg: {
+        message: '', input_mode: 'text', input_tag: 'note',
+        prompt: 'متن خود را بنویسید:', force_reply: true,
+        input_validation: 'length', input_min: 1, input_max: 1000,
+        sanitize_text: true, max_attempts: 0, attempt_window_sec: 0,
+        error_message: ''
+      }
+    }
+  ];
+
+  var CONDITION_PRESETS = [
+    {
+      name: '✅ معتبر / ❌ نامعتبر',
+      cfg: {
+        message: '', condition_source: 'last',
+        branches: [
+          { label: 'معتبر بود', op: 'is_valid', value: '', goto: '' },
+          { label: 'نامعتبر بود', op: 'else', value: '', goto: '' }
+        ]
+      }
+    },
+    {
+      name: '🎟️ مقایسهٔ یک کد مشخص',
+      cfg: {
+        message: '', condition_source: 'last',
+        branches: [
+          { label: 'کد درست بود', op: 'eq', value: 'OFF50', goto: '' },
+          { label: 'کد اشتباه بود', op: 'else', value: '', goto: '' }
+        ]
+      }
+    },
+    {
+      name: '🔢 بزرگ‌تر/کوچک‌تر از یک عدد',
+      cfg: {
+        message: '', condition_source: 'last',
+        branches: [
+          { label: 'بیشتر از ۱۰۰', op: 'gt', value: '100', goto: '' },
+          { label: 'بقیه', op: 'else', value: '', goto: '' }
+        ]
+      }
+    }
+  ];
+
   var uid = (function () {
     var c = 0;
     return function () {
@@ -367,6 +485,33 @@
     );
   }
 
+  // Renders the friendly "what is this node + example" guide for a type.
+  function typeGuideBlock(type) {
+    var g = TYPE_GUIDE[type];
+    if (!g) return null;
+    return h('div', { className: 'type-guide', key: 'tg' },
+      h('div', { className: 'tg-h' },
+        h('span', { className: 'tg-ico' }, g.icon),
+        h('span', null, g.title)),
+      h('div', { className: 'tg-desc' }, g.desc),
+      h('div', { className: 'tg-ex' }, g.ex)
+    );
+  }
+
+  // Renders a row of preset chips. onPick receives the chosen cfg object.
+  function presetRow(presets, hint, onPick) {
+    return h('div', { key: 'presets' },
+      hint ? h('div', { className: 'preset-hint' }, hint) : null,
+      h('div', { className: 'preset-row' },
+        presets.map(function (p, i) {
+          return h('button', {
+            key: 'ps' + i, type: 'button', className: 'preset-btn',
+            onClick: function () { onPick(p.cfg); }
+          }, p.name);
+        }))
+    );
+  }
+
   function NodeForm(props) {
     // props: draft {id?, type, label, system, config}, isNew, onSave, onDelete, onClose
     var d = props.draft;
@@ -374,6 +519,7 @@
     var isNew = props.isNew;
     var isSystem = !!d.system;
     var isMenu = d.node_kind === 'system_menu';
+    var childCount = props.childCount || 0;
 
     function setField(k, v) {
       var nd = Object.assign({}, d);
@@ -385,6 +531,10 @@
       nc[k] = v;
       setField('config', nc);
     }
+    // Apply a whole preset config at once (keeps the user's existing label).
+    function applyPreset(presetCfg) {
+      setField('config', Object.assign({}, presetCfg));
+    }
     var cfg = d.config || {};
 
     var rows = [];
@@ -395,6 +545,12 @@
     } else if (isSystem) {
       rows.push(h('div', { className: 'sys-warn', key: 'sw' },
         '⚠️ این یک نود سیستمی محافظت‌شده است. تغییر یا حذف آن می‌تواند رفتار ربات را خراب کند. فقط در صورت اطمینان ادامه دهید.'));
+    }
+
+    // Friendly "what is this node + example" guide at the very top of the form.
+    if (!isMenu) {
+      var guide = typeGuideBlock(d.type);
+      if (guide) rows.push(guide);
     }
 
     // --- common: type (locked for system root) + label ---
@@ -501,16 +657,122 @@
             'وقتی فعال باشد، با زدن این دکمه دیگر پیام پیش‌فرض ربات (مثل «اشتراک‌های خریداری‌شده…») فرستاده نمی‌شود و فقط دکمه‌های فرزندی که خودتان اضافه کرده‌اید نمایش داده می‌شود. اگر خاموش باشد، رفتار بومی ربات مثل قبل اجرا و فرزندان شما هم بعد از آن نشان داده می‌شوند.')
         ));
       }
+
+      // ---- Child button LAYOUT (only meaningful with 2+ children) --------
+      // Replaces the old standalone keyboard-layout page: arrange this node's
+      // child buttons into rows. 'auto' = one per row (default).
+      if (childCount > 1) {
+        var lay = (typeof cfg.child_layout === 'string') ? cfg.child_layout.trim() : '';
+        // Decide which preset the current value maps to.
+        var preset = 'auto';
+        if (/^\d+$/.test(lay)) preset = lay;          // "2","3",...
+        else if (lay !== '') preset = 'custom';        // CSV pattern
+        function setLayoutPreset(val) {
+          if (val === 'auto') setCfg('child_layout', '');
+          else if (val === 'custom') setCfg('child_layout', lay && !/^\d+$/.test(lay) ? lay : (childCount + ''));
+          else setCfg('child_layout', val);            // "2".."4"
+        }
+        // Live preview of how rows will look.
+        function previewRows() {
+          var per = null, pattern = null;
+          if (/^\d+$/.test(lay)) per = Math.max(1, Math.min(8, parseInt(lay, 10)));
+          else if (lay !== '') {
+            pattern = lay.split(',').map(function (x) { return parseInt(x, 10); })
+              .filter(function (x) { return x >= 1 && x <= 8; });
+          }
+          var rows = [], i = 0, n = childCount;
+          if (per) { while (i < n) { rows.push(Math.min(per, n - i)); i += per; } }
+          else if (pattern && pattern.length) {
+            for (var k = 0; k < pattern.length && i < n; k++) { rows.push(Math.min(pattern[k], n - i)); i += pattern[k]; }
+            while (i < n) { rows.push(1); i++; }
+          } else { for (; i < n; i++) rows.push(1); }
+          return rows;
+        }
+        var pv = previewRows();
+        rows.push(h('div', { className: 'grp', key: 'glayout' },
+          h('div', { className: 'grp-t' }, 'چیدمان دکمه‌های فرزند (' + childCount + ' دکمه)'),
+          h('select', {
+            value: preset,
+            onChange: function (e) { setLayoutPreset(e.target.value); },
+            style: { width: '100%', marginBottom: '8px' }
+          },
+            h('option', { value: 'auto' }, 'خودکار — هر دکمه در یک ردیف'),
+            h('option', { value: '2' }, '۲ ستونه (هر ردیف ۲ دکمه)'),
+            h('option', { value: '3' }, '۳ ستونه (هر ردیف ۳ دکمه)'),
+            h('option', { value: '4' }, '۴ ستونه (هر ردیف ۴ دکمه)'),
+            h('option', { value: 'custom' }, 'سفارشی — تعداد دلخواه هر ردیف')
+          ),
+          (preset === 'custom')
+            ? h('input', {
+                type: 'text',
+                value: (lay && !/^\d+$/.test(lay)) ? lay : '',
+                placeholder: 'مثلاً: 2,1,3 یعنی ردیف اول ۲ دکمه، دوم ۱، سوم ۳',
+                onChange: function (e) { setCfg('child_layout', e.target.value); },
+                style: { width: '100%', marginBottom: '8px' }
+              })
+            : null,
+          // visual preview
+          h('div', { className: 'layout-preview', style: { display: 'flex', flexDirection: 'column', gap: '4px' } },
+            pv.map(function (count, ri) {
+              return h('div', { key: 'r' + ri, style: { display: 'flex', gap: '4px' } },
+                Array.apply(null, { length: count }).map(function (_, ci) {
+                  return h('div', {
+                    key: 'c' + ci,
+                    style: {
+                      flex: 1, height: '22px', borderRadius: '6px',
+                      background: 'rgba(99,102,241,.25)', border: '1px solid rgba(99,102,241,.5)'
+                    }
+                  });
+                })
+              );
+            })
+          ),
+          h('div', { className: 'hlp' },
+            'نمایی از چیدمان دکمه‌ها در ربات. در حالت «سفارشی» اعداد را با کاما جدا کنید (هر عدد تعداد دکمهٔ آن ردیف، بین ۱ تا ۸). اگر مجموع اعداد کمتر از تعداد دکمه‌ها باشد، بقیه هرکدام در یک ردیف می‌آیند.')
+        ));
+      }
     }
 
     if (d.type === 'action') {
-      rows.push(field('کلید اکشن داخلی',
-        h('input', {
-          key: 'ak', type: 'text', value: cfg.action_key || '',
-          placeholder: 'مثلاً: buy, account, support',
-          onChange: function (e) { setCfg('action_key', e.target.value); }
-        }),
-        'شناسهٔ یک عملیات داخلی ربات که هنگام رسیدن به این نود اجرا می‌شود.'));
+      // Common built-in actions, picked from a friendly list. "custom" lets an
+      // advanced admin type any key manually.
+      var COMMON_ACTIONS = [
+        ['buy', '🛒 خرید سرویس'],
+        ['account', '👤 حساب کاربری / کیف پول'],
+        ['support', '🛟 پشتیبانی'],
+        ['services', '📦 سرویس‌های من'],
+        ['help', '❓ راهنما'],
+        ['test', '🔋 دریافت اکانت تست'],
+        ['__custom__', '✏️ سایر (دستی وارد می‌کنم)']
+      ];
+      var knownKeys = COMMON_ACTIONS.map(function (a) { return a[0]; });
+      var curKey = cfg.action_key || '';
+      var isKnown = curKey !== '' && knownKeys.indexOf(curKey) !== -1 && curKey !== '__custom__';
+      var selVal = isKnown ? curKey : (curKey === '' ? '' : '__custom__');
+      rows.push(h('div', { className: 'grp', key: 'gact' },
+        h('div', { className: 'grp-t' }, 'این دکمه چه کاری انجام دهد؟'),
+        field('عملیات',
+          h('select', {
+            value: selVal,
+            onChange: function (e) {
+              var v = e.target.value;
+              if (v === '__custom__') { setCfg('action_key', curKey && !isKnown ? curKey : ''); }
+              else { setCfg('action_key', v); }
+            }
+          },
+            h('option', { value: '' }, '— انتخاب کنید —'),
+            COMMON_ACTIONS.map(function (a) {
+              return h('option', { key: a[0], value: a[0] }, a[1]);
+            })),
+          'یکی از کارهای آمادهٔ ربات را انتخاب کنید. اگر کاری که می‌خواهید اینجا نیست، گزینهٔ «سایر» را بزنید و شناسهٔ آن را دستی بنویسید.'),
+        (selVal === '__custom__') ? field('شناسهٔ اکشن (دستی)',
+          h('input', {
+            type: 'text', value: curKey === '__custom__' ? '' : curKey,
+            placeholder: 'مثلاً: invite, gift, renew',
+            onChange: function (e) { setCfg('action_key', e.target.value); }
+          }),
+          'شناسهٔ فنیِ عملیاتی که داخل کد ربات تعریف شده است.') : null
+      ));
     }
 
     if (d.type === 'condition') {
@@ -547,14 +809,22 @@
         );
       });
 
+      rows.push(h('div', { className: 'grp', key: 'gcondpre' },
+        h('div', { className: 'grp-t' }, '✨ الگوهای آماده — یکی را انتخاب کنید'),
+        presetRow(CONDITION_PRESETS,
+          'برای شروع، یکی از این الگوهای رایج را بزنید تا شاخه‌ها خودکار ساخته شوند؛ بعد متن و مقدارها را عوض کنید.',
+          applyPreset)
+      ));
       rows.push(h('div', { className: 'grp', key: 'gcond' },
         h('div', { className: 'grp-t' }, 'تنظیمات شرط (انشعاب)'),
-        field('منبع مقدار',
+        h('div', { className: 'hlp', style: { marginBottom: '8px' } },
+          'به زبان ساده: شرط مثل یک نگهبانِ سرِ دوراهی است. مقدار «منبع» را با هر شاخه از بالا به پایین می‌سنجد؛ اولین شاخه‌ای که درست باشد، برنده می‌شود و کاربر به فرزندِ متناظر آن می‌رود. همیشه یک شاخهٔ «در غیر این صورت» بگذارید تا اگر هیچ‌کدام نشد، کاربر سرگردان نماند.'),
+        field('روی چه چیزی شرط بگذاریم؟',
           h('select', { value: cfg.condition_source || 'last', onChange: function (e) { setCfg('condition_source', e.target.value); } },
-            h('option', { value: 'last' }, 'آخرین ورودی کاربر'),
-            h('option', { value: 'input' }, 'یک ورودی ذخیره‌شده (با کلید)'),
-            h('option', { value: 'n8n' }, 'پاسخ n8n (با کلید)')),
-          'مقداری که شرط روی آن ارزیابی می‌شود.'),
+            h('option', { value: 'last' }, 'آخرین چیزی که کاربر فرستاد'),
+            h('option', { value: 'input' }, 'یک ورودی ذخیره‌شده (با کلیدِ همان نود ورودی)'),
+            h('option', { value: 'n8n' }, 'پاسخی که از n8n برگشته (با کلید)')),
+          'معمولاً «آخرین چیزی که کاربر فرستاد» درست است.'),
         (cfg.condition_source === 'input' || cfg.condition_source === 'n8n') ? field('کلید منبع',
           h('input', { type: 'text', value: cfg.condition_source_key || '', placeholder: cfg.condition_source === 'n8n' ? 'مثلاً: status' : 'مثلاً: discount_code', onChange: function (e) { setCfg('condition_source_key', e.target.value); } })) : null,
         field('پیام (اختیاری)',
@@ -566,34 +836,79 @@
     }
 
     if (d.type === 'n8n') {
+      // Quick-start chips that fill the common settings for typical use-cases.
+      var N8N_PRESETS = [
+        {
+          name: '🧾 بررسی خودکار رسید',
+          cfg: Object.assign({}, cfg, {
+            n8n_mode: 'async', n8n_timeout_sec: 8, n8n_tag: 'verify_receipt',
+            send_path: true, send_inputs: true,
+            wait_message: 'در حال بررسی رسید شما… چند لحظه صبر کنید 🙏'
+          })
+        },
+        {
+          name: '📊 ثبت در گوگل‌شیت',
+          cfg: Object.assign({}, cfg, {
+            n8n_mode: 'async', n8n_timeout_sec: 5, n8n_tag: 'save_sheet',
+            send_path: true, send_inputs: true,
+            wait_message: 'در حال ثبت اطلاعات شما…'
+          })
+        },
+        {
+          name: '⚡ پاسخ فوری (همگام)',
+          cfg: Object.assign({}, cfg, {
+            n8n_mode: 'sync', n8n_timeout_sec: 10, n8n_tag: 'quick',
+            send_path: false, send_inputs: true,
+            wait_message: 'لطفاً صبر کنید…'
+          })
+        }
+      ];
+      rows.push(h('div', { className: 'grp', key: 'gn8npre' },
+        h('div', { className: 'grp-t' }, '✨ کاربردهای رایج — یکی را انتخاب کنید'),
+        presetRow(N8N_PRESETS,
+          'اگر مطمئن نیستید، یکی از این‌ها را بزنید؛ فقط کافی است بعد آدرس Webhook را وارد کنید.',
+          applyPreset)
+      ));
       rows.push(h('div', { className: 'grp', key: 'gn8n' },
-        h('div', { className: 'grp-t' }, 'تنظیمات n8n'),
-        field('حالت ارسال',
+        h('div', { className: 'grp-t' }, 'اتصال به n8n'),
+        field('آدرس Webhook (از n8n کپی کنید)',
+          h('input', { type: 'text', value: cfg.n8n_endpoint || '', placeholder: 'https://n8n.example.com/webhook/...', onChange: function (e) { setCfg('n8n_endpoint', e.target.value); } }),
+          'این آدرس را از داخل سناریوی n8n خود (گرهِ Webhook) بردارید. بدون آن، این نود کاری نمی‌کند.'),
+        field('چطور منتظر پاسخ بمانیم؟',
           h('select', { value: cfg.n8n_mode || 'async', onChange: function (e) { setCfg('n8n_mode', e.target.value); } },
-            h('option', { value: 'async' }, 'ناهمگام (Webhook بازگشتی) — پیشنهادی'),
-            h('option', { value: 'sync' }, 'همگام (انتظار با تایم‌اوت)')),
-          'حالت ناهمگام برای جلوگیری از کندی/کرش سرور هنگام بار زیاد توصیه می‌شود.'),
-        field('آدرس Webhook در n8n',
-          h('input', { type: 'text', value: cfg.n8n_endpoint || '', placeholder: 'https://n8n.example.com/webhook/...', onChange: function (e) { setCfg('n8n_endpoint', e.target.value); } })),
+            h('option', { value: 'async' }, 'پشت‌صحنه ادامه بده، پاسخ بعداً برسد (پیشنهادی)'),
+            h('option', { value: 'sync' }, 'همین‌جا منتظر پاسخ بمان (با محدودیت زمان)')),
+          'حالت «پشت‌صحنه» برای ربات‌های پرمراجعه بهتر است و باعث کندی ربات نمی‌شود.'),
         h('div', { className: 'fld row' },
-          h('div', null, h('label', null, 'تایم‌اوت (ثانیه)'),
+          h('div', null, h('label', null, 'حداکثر زمان انتظار (ثانیه)'),
             h('input', { type: 'number', min: 1, max: 30, value: cfg.n8n_timeout_sec || 5, onChange: function (e) { setCfg('n8n_timeout_sec', parseInt(e.target.value || '5', 10)); } })),
-          h('div', null, h('label', null, 'برچسب'),
-            h('input', { type: 'text', value: cfg.n8n_tag || '', onChange: function (e) { setCfg('n8n_tag', e.target.value); } }))),
-        h('label', { className: 'chk' },
-          h('input', { type: 'checkbox', checked: cfg.send_path !== false, onChange: function (e) { setCfg('send_path', e.target.checked); } }),
-          'ارسال مسیر کاربر (Breadcrumb) به n8n'),
+          h('div', null, h('label', null, 'برچسب (برای خودتان، اختیاری)'),
+            h('input', { type: 'text', value: cfg.n8n_tag || '', placeholder: 'مثلاً: verify_receipt', onChange: function (e) { setCfg('n8n_tag', e.target.value); } }))),
+        field('پیام «در حال انجام» به کاربر',
+          h('input', { type: 'text', value: cfg.wait_message || '', placeholder: 'در حال بررسی… چند لحظه صبر کنید 🙏', onChange: function (e) { setCfg('wait_message', e.target.value); } }),
+          'وقتی n8n مشغول است، این پیام به کاربر نشان داده می‌شود تا فکر نکند ربات قطع شده.')
+      ));
+      rows.push(h('div', { className: 'grp', key: 'gn8ndata' },
+        h('div', { className: 'grp-t' }, 'چه چیزی برای n8n بفرستیم؟'),
         h('label', { className: 'chk' },
           h('input', { type: 'checkbox', checked: cfg.send_inputs !== false, onChange: function (e) { setCfg('send_inputs', e.target.checked); } }),
-          'ارسال ورودی‌های جمع‌آوری‌شدهٔ کاربر'),
-        field('پیام انتظار',
-          h('input', { type: 'text', value: cfg.wait_message || '', onChange: function (e) { setCfg('wait_message', e.target.value); } }))
+          'اطلاعاتی که کاربر در مراحل قبل وارد کرده (مثل کد، شماره، رسید)'),
+        h('label', { className: 'chk' },
+          h('input', { type: 'checkbox', checked: cfg.send_path !== false, onChange: function (e) { setCfg('send_path', e.target.checked); } }),
+          'مسیری که کاربر در منو طی کرده (برای اینکه n8n بداند کاربر از کجا آمده)')
       ));
     }
 
     // ---- Phase 4: INPUT node full config (text + files + security) ----
     if (d.type === 'input') {
       var mode = cfg.input_mode || 'text';
+      // Ready-made templates: one tap fills all the fields below.
+      rows.push(h('div', { className: 'grp', key: 'ginpre' },
+        h('div', { className: 'grp-t' }, '✨ الگوهای آماده — یکی را انتخاب کنید'),
+        presetRow(INPUT_PRESETS,
+          'برای شروع سریع، روی یکی بزنید تا همهٔ فیلدها خودکار پر شوند؛ بعد فقط متن‌ها را به دلخواه عوض کنید.',
+          applyPreset)
+      ));
       rows.push(h('div', { className: 'grp', key: 'gin' },
         h('div', { className: 'grp-t' }, 'تنظیمات ورودی کاربر'),
         field('نوع ورودی مجاز',
@@ -1398,11 +1713,21 @@
         h(NodeForm, {
           draft: panel.draft,
           setDraft: function (nd) { setPanel(Object.assign({}, panel, { draft: nd })); },
-          isNew: panel.isNew
+          isNew: panel.isNew,
+          // How many children this node currently has (for the layout control).
+          childCount: (panel.draft && panel.draft.id)
+            ? edges.filter(function (e) { return e.source === panel.draft.id; }).length
+            : 0
         }),
         h('div', { className: 'side-foot' },
           h('button', { className: 'btn primary', onClick: savePanel }, panel.isNew ? 'افزودن نود' : 'ذخیرهٔ تغییرات'),
-          (!panel.isNew && panel.draft.id && panel.draft.id !== 'n_root')
+          // Delete is hidden for the root and for protected system nodes
+          // (real-menu buttons + demo mirrors): those are wired to the bot and
+          // must never be removable from here.
+          (!panel.isNew && panel.draft.id && panel.draft.id !== 'n_root'
+            && !panel.draft.system
+            && panel.draft.node_kind !== 'system_menu'
+            && panel.draft.node_kind !== 'system_demo')
             ? h('button', { className: 'btn danger', onClick: function () { deleteNode(panel.draft.id); } }, '🗑 حذف')
             : null
         )
