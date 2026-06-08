@@ -69,6 +69,15 @@ $keyboardRows = [];
 if (is_array($keyboardLayout) && isset($keyboardLayout['keyboard']) && is_array($keyboardLayout['keyboard'])) {
     $keyboardRows = $keyboardLayout['keyboard'];
 }
+// Hard guarantee: in any non-VPN profile, never show VPN-only buttons
+// (free test account, luck wheel, extend) — even if the admin dragged them
+// into a custom layout. This filters at render time only; the DB is untouched.
+if (
+    function_exists('panel_mode') && function_exists('strip_vpn_only_buttons')
+    && panel_mode() !== 'vpn' && !empty($keyboardRows)
+) {
+    $keyboardRows = strip_vpn_only_buttons($keyboardRows);
+}
 
 if ($setting['inlinebtnmain'] == "oninline" && !empty($keyboardRows)) {
     $trace_keyboard = $keyboardRows;

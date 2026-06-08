@@ -2578,6 +2578,50 @@ function default_main_keyboard_json($mode = null)
 }
 
 /**
+ * Template keys that only make sense for a VPN panel. In any non-VPN profile
+ * (shop / digital / …) these buttons are hidden from the bot's main menu.
+ *   text_usertest   → free trial VPN account
+ *   text_wheel_luck → luck wheel (VPN giveaways)
+ *   text_extend     → extend an existing VPN service
+ */
+function vpn_only_keyboard_keys()
+{
+    return ['text_usertest', 'text_wheel_luck', 'text_extend'];
+}
+
+/**
+ * Remove VPN-only buttons from a keyboard "rows" array (the value of the
+ * "keyboard" key). Used at menu-build time so a shop/digital bot never shows
+ * VPN buttons even if the admin dragged them into a custom layout. Empty rows
+ * left behind are dropped. The stored layout in the DB is NOT modified.
+ *
+ * @param array $rows  e.g. [[['text'=>'text_sell'],['text'=>'text_usertest']], ...]
+ * @return array       filtered rows
+ */
+function strip_vpn_only_buttons(array $rows)
+{
+    $drop = array_flip(vpn_only_keyboard_keys());
+    $out = [];
+    foreach ($rows as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        $kept = [];
+        foreach ($row as $btn) {
+            $txt = is_array($btn) ? ($btn['text'] ?? '') : '';
+            if (isset($drop[$txt])) {
+                continue;
+            }
+            $kept[] = $btn;
+        }
+        if (!empty($kept)) {
+            $out[] = array_values($kept);
+        }
+    }
+    return $out;
+}
+
+/**
  * True when the stored keyboardmain still equals one of the factory defaults
  * (VPN or any store layout). Used to decide whether it's safe to auto-swap the
  * layout when the panel mode changes — we never overwrite a layout the admin

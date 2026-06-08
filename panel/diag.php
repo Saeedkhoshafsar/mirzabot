@@ -64,6 +64,75 @@ if (isset($_GET['writetest'])) {
     echo ">>> If set_... returned true but DB did NOT change, it's a WRITE issue (no setting row?).\n";
 }
 
+// 3b) FULL PANEL-FORM SIMULATION ----------------------------------------------
+// Mimics the exact cb_save handler in panel/keyboard.php to prove the form
+// pathway persists. Run with ?formtest=1 — it ADDS a button named
+// "شبیه‌سازی فرم HH:MM:SS", then re-reads via the SAME function the panel uses.
+if (isset($_GET['formtest'])) {
+    echo "\n--- FORM SIMULATION (exact panel cb_save logic) ---\n";
+    // Build POST-like arrays: keep the existing buttons + one brand-new one.
+    $existing = automation_buttons(0);
+    $bLabels = [];
+    $bMsgs = [];
+    $bUrls = [];
+    $bActive = [];
+    foreach ($existing as $i => $b) {
+        $bLabels[$i] = $b['label'];
+        $bMsgs[$i] = $b['message'];
+        $bUrls[$i] = $b['url'];
+        $bActive[$i] = $b['active'] ? '1' : null;
+    }
+    $newIdx = count($existing);
+    $bLabels[$newIdx] = 'شبیه‌سازی فرم ' . date('H:i:s');
+    $bMsgs[$newIdx] = 'این دکمه از طریق شبیه‌سازی فرم اضافه شد';
+    $bUrls[$newIdx] = '';
+    $bActive[$newIdx] = '1';
+
+    echo "labels submitted: " . count($bLabels) . " (expected existing+1 = " . ($newIdx + 1) . ")\n";
+
+    // --- verbatim cb_save logic ---
+    $cfg = get_automation_config(0);
+    if (!is_array($cfg)) {
+        $cfg = [];
+    }
+    $buttons = [];
+    foreach ($bLabels as $i => $lbl) {
+        $lbl = trim((string) $lbl);
+        if ($lbl === '') {
+            continue;
+        }
+        $url = trim((string) ($bUrls[$i] ?? ''));
+        if ($url !== '' && !preg_match('~^https?://~i', $url)) {
+            $url = '';
+        }
+        $buttons[] = [
+            'id'      => 'b' . substr(md5($lbl . $i . microtime()), 0, 8),
+            'label'   => $lbl,
+            'event'   => 'custom.trigger',
+            'message' => trim((string) ($bMsgs[$i] ?? '')),
+            'url'     => $url,
+            'active'  => isset($bActive[$i]),
+        ];
+    }
+    $cfg['buttons'] = $buttons;
+    $ok = set_automation_config($cfg, 0);
+    echo "set_automation_config returned: " . var_export($ok, true) . "\n";
+
+    // Re-read the SAME way the panel does after redirect:
+    $after = automation_buttons(0);
+    echo "automation_buttons(0) now returns: " . count($after) . " button(s)\n";
+    foreach ($after as $b) {
+        echo "   - " . $b['label'] . "\n";
+    }
+    // And straight from DB to be sure:
+    $raw = $pdo->query("SELECT automation_config FROM setting LIMIT 1")->fetchColumn();
+    $dbCfg = json_decode((string) $raw, true);
+    echo "DB automation_config.buttons count: " . count($dbCfg['buttons'] ?? []) . "\n";
+    echo "\n>>> If both counts == " . ($newIdx + 1) . ", the SAVE PATH WORKS and the\n";
+    echo ">>> panel form should work too. If automation_buttons(0) is LOWER than the\n";
+    echo ">>> DB count, it's a stale-cache read bug (now fixed via clearSelectCache).\n";
+}
+
 // 4) Main keyboard -------------------------------------------------------------
 echo "\n--- setting.keyboardmain (bot main menu) ---\n";
 $km = null;
