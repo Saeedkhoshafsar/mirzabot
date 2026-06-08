@@ -231,12 +231,12 @@ include __DIR__ . '/inc/layout_head.php';
                 <div style="height:1px;background:var(--bd);margin:2px 0"></div>
                 <?php if ($isBlocked): ?>
                     <a href="user_action.php?action=unblock&id=<?= $id ?>&_csrf=<?= csrf_token() ?>&back=user.php"
-                        class="btn btn-ok btn-sm" style="justify-content:center" data-confirm=$textbotlang['panel']['userConfirmUnblockUser']>
+                        class="btn btn-ok btn-sm" style="justify-content:center" data-confirm="<?= htmlspecialchars($textbotlang['panel']['userConfirmUnblockUser']) ?>">
                         <?= icon('check', 13) ?> <?= $textbotlang['panel']['userColDate'] ?>
                     </a>
                 <?php else: ?>
                     <a href="user_action.php?action=block&id=<?= $id ?>&_csrf=<?= csrf_token() ?>&back=user.php"
-                        class="btn btn-no btn-sm" style="justify-content:center" data-confirm=$textbotlang['panel']['userConfirmBlockUser']>
+                        class="btn btn-no btn-sm" style="justify-content:center" data-confirm="<?= htmlspecialchars($textbotlang['panel']['userConfirmBlockUser']) ?>">
                         <?= icon('block', 13) ?> <?= $textbotlang['panel']['userNoTransactionForUser'] ?>
                     </a>
                 <?php endif; ?>
@@ -462,7 +462,7 @@ include __DIR__ . '/inc/layout_head.php';
                 <input type="hidden" name="action" value="add_balance">
                 <div class="field">
                     <label><?= $textbotlang['panel']['userDetailUser'] ?></label>
-                    <input type="number" name="amount" class="input" placeholder=$textbotlang['panel']['userAmountPlaceholder'] min="1000" required>
+                    <input type="number" name="amount" class="input" placeholder="<?= htmlspecialchars($textbotlang['panel']['userAmountPlaceholder']) ?>" min="1000" required>
                     <span class="field-hint"><?= $textbotlang['panel']['userDetailAmount'] ?> <strong><?= number_format($balance) ?> <?= $textbotlang['panel']['userDetailMethod'] ?></strong></span>
                 </div>
             </div>

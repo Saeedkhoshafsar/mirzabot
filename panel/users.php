@@ -92,7 +92,7 @@ include __DIR__ . '/inc/layout_head.php';
 
             <div class="search-box" style="min-width:260px">
                 <?= icon('search', 15) ?>
-                <input type="text" name="q" placeholder=$textbotlang['panel']['usersSearchUserPlaceholder']
+                <input type="text" name="q" placeholder="<?= htmlspecialchars($textbotlang['panel']['usersSearchUserPlaceholder']) ?>"
                     value="<?= htmlspecialchars($search) ?>" autocomplete="off">
                 <button type="button" class="search-clear">✕</button>
                 <button type="submit" class="search-btn"><?= $textbotlang['panel']['usersAllGroups'] ?></button>
@@ -182,18 +182,18 @@ include __DIR__ . '/inc/layout_head.php';
                             <td>
                                 <div style="display:flex;gap:4px">
                                     <a href="user.php?id=<?= (int) $u['id'] ?>" class="btn btn-ghost btn-sm btn-icon"
-                                        title=$textbotlang['panel']['usersViewBtn']>
+                                        title="<?= htmlspecialchars($textbotlang['panel']['usersViewBtn']) ?>">
                                         <?= icon('eye', 14) ?>
                                     </a>
                                     <?php if ($isBlocked): ?>
                                         <a href="user_action.php?action=unblock&id=<?= (int) $u['id'] ?>&_csrf=<?= csrf_token() ?>&back=users.php"
-                                            class="btn btn-ok btn-sm btn-icon" title=$textbotlang['panel']['usersUnblockBtn']
+                                            class="btn btn-ok btn-sm btn-icon" title="<?= htmlspecialchars($textbotlang['panel']['usersUnblockBtn']) ?>"
                                             data-confirm=sprintf($textbotlang['panel']['usersConfirmUnblockUser'], $name, $u['id'])>
                                             <?= icon('check', 13) ?>
                                         </a>
                                     <?php else: ?>
                                         <a href="user_action.php?action=block&id=<?= (int) $u['id'] ?>&_csrf=<?= csrf_token() ?>&back=users.php"
-                                            class="btn btn-no btn-sm btn-icon" title=$textbotlang['panel']['usersBlockBtn']
+                                            class="btn btn-no btn-sm btn-icon" title="<?= htmlspecialchars($textbotlang['panel']['usersBlockBtn']) ?>"
                                             data-confirm=sprintf($textbotlang['panel']['usersConfirmBlockUser'], $name, $u['id'])>
                                             <?= icon('block', 13) ?>
                                         </a>

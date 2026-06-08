@@ -109,7 +109,7 @@ include __DIR__ . '/inc/layout_head.php';
       <div class="toolbar-title"><?= $textbotlang['panel']['productColTime'] ?> <small>(<?= count($products) ?>)</small></div>
       <div class="search-box" style="min-width:220px">
         <?= icon('search', 14) ?>
-        <input type="text" placeholder=$textbotlang['panel']['productSearchPlaceholder'] data-filter="prodTbl">
+        <input type="text" placeholder="<?= htmlspecialchars($textbotlang['panel']['productSearchPlaceholder']) ?>" data-filter="prodTbl">
         <button type="button" class="search-clear">✕</button>
       </div>
     </div>
@@ -144,7 +144,7 @@ include __DIR__ . '/inc/layout_head.php';
               <td class="cm" style="font-size:.72rem"><?= htmlspecialchars($p['code_product'] ?? '') ?></td>
               <td>
                 <div style="display:flex;gap:5px">
-                  <button class="btn btn-ghost btn-sm btn-icon" title=$textbotlang['panel']['productEditBtn']
+                  <button class="btn btn-ghost btn-sm btn-icon" title="<?= htmlspecialchars($textbotlang['panel']['productEditBtn']) ?>"
                     onclick="openEditModal(<?= htmlspecialchars(json_encode($p), ENT_QUOTES) ?>)">
                     <?= icon('edit', 13) ?>
                   </button>
@@ -161,7 +161,7 @@ include __DIR__ . '/inc/layout_head.php';
                     </a>
                   <?php endif; ?>
                   <a href="product.php?delete=<?= (int) $p['id'] ?>&_csrf=<?= csrf_token() ?>"
-                    class="btn btn-no btn-sm btn-icon" title=$textbotlang['panel']['productDeleteBtn']
+                    class="btn btn-no btn-sm btn-icon" title="<?= htmlspecialchars($textbotlang['panel']['productDeleteBtn']) ?>"
                     data-confirm=sprintf($textbotlang['panel']['productConfirmDeleteProduct'], $p['name_product'])>
                     <?= icon('trash', 13) ?>
                   </a>
@@ -188,23 +188,23 @@ include __DIR__ . '/inc/layout_head.php';
         <div class="form-grid">
           <div class="field full">
             <label><?= $textbotlang['panel']['productFieldDescription'] ?></label>
-            <input type="text" name="name_product" class="input" placeholder=$textbotlang['panel']['productNameExample'] required>
+            <input type="text" name="name_product" class="input" placeholder="<?= htmlspecialchars($textbotlang['panel']['productNameExample']) ?>" required>
           </div>
           <div class="field">
             <label><?= $textbotlang['panel']['productSaveBtn'] ?></label>
-            <input type="number" name="price_product" class="input" placeholder=$textbotlang['panel']['productZeroValue'] min="0">
+            <input type="number" name="price_product" class="input" placeholder="<?= htmlspecialchars($textbotlang['panel']['productZeroValue']) ?>" min="0">
           </div>
           <div class="field">
             <label><?= $textbotlang['panel']['productVolumeGbSuffix'] ?></label>
-            <input type="number" name="volume_product" class="input" placeholder=$textbotlang['panel']['productFiftyValue'] min="0">
+            <input type="number" name="volume_product" class="input" placeholder="<?= htmlspecialchars($textbotlang['panel']['productFiftyValue']) ?>" min="0">
           </div>
           <div class="field">
             <label><?= $textbotlang['panel']['productCancelBtn'] ?></label>
-            <input type="number" name="time_product" class="input" placeholder=$textbotlang['panel']['productThirtyValue'] min="0">
+            <input type="number" name="time_product" class="input" placeholder="<?= htmlspecialchars($textbotlang['panel']['productThirtyValue']) ?>" min="0">
           </div>
           <div class="field">
             <label><?= $textbotlang['panel']['productFieldLocation'] ?></label>
-            <input type="text" name="cetegory_product" class="input" placeholder=$textbotlang['panel']['productTypeExample']>
+            <input type="text" name="cetegory_product" class="input" placeholder="<?= htmlspecialchars($textbotlang['panel']['productTypeExample']) ?>">
           </div>
           <div class="field">
             <label><?= $textbotlang['panel']['productFieldCategory'] ?></label>
@@ -226,7 +226,7 @@ include __DIR__ . '/inc/layout_head.php';
           </div>
           <div class="field full">
             <label><?= $textbotlang['panel']['productColDescription'] ?></label>
-            <input type="text" name="note_product" class="input" placeholder=$textbotlang['panel']['productDescriptionOptional']>
+            <input type="text" name="note_product" class="input" placeholder="<?= htmlspecialchars($textbotlang['panel']['productDescriptionOptional']) ?>">
           </div>
           <div class="field full">
             <label>نوع محصول</label>

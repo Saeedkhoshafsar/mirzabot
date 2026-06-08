@@ -99,7 +99,7 @@ include __DIR__ . '/inc/layout_head.php';
       </select>
       <div class="search-box" style="min-width:230px">
         <?= icon('search', 14) ?>
-        <input type="text" name="q" placeholder=$textbotlang['panel']['paymentSearchTransactionPlaceholder']
+        <input type="text" name="q" placeholder="<?= htmlspecialchars($textbotlang['panel']['paymentSearchTransactionPlaceholder']) ?>"
           value="<?= htmlspecialchars($search) ?>">
         <button type="button" class="search-clear">✕</button>
         <button type="submit" class="search-btn"><?= $textbotlang['panel']['paymentColTrackingCode'] ?></button>

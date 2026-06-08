@@ -1,0 +1,85 @@
+<?php
+// -----------------------------------------------------------------------------
+// Temporary diagnostics page. Open it as an admin to see exactly what is stored
+// in the DB for store mode, custom buttons and the bot's main keyboard.
+// Safe to delete once debugging is finished.
+// -----------------------------------------------------------------------------
+require_once __DIR__ . '/inc/config.php';
+require_once __DIR__ . '/../automation.php';
+require_auth();
+
+header('Content-Type: text/plain; charset=utf-8');
+
+echo "=== PANEL DIAGNOSTICS ===\n\n";
+
+// 1) Panel mode resolution -----------------------------------------------------
+$env = getenv('PANEL_MODE');
+echo "ENV PANEL_MODE       : " . ($env === false ? '(not set)' : $env) . "\n";
+echo "panel_mode()         : " . (function_exists('panel_mode') ? panel_mode() : 'n/a') . "\n";
+echo "panel_is_shop()      : " . (function_exists('panel_is_shop') ? var_export(panel_is_shop(), true) : 'n/a') . "\n";
+
+try {
+    $row = $pdo->query("SELECT store_mode, store_currency FROM setting LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    echo "setting.store_mode   : " . var_export($row['store_mode'] ?? null, true) . "\n";
+    echo "setting.store_currency: " . var_export($row['store_currency'] ?? null, true) . "\n";
+} catch (Throwable $e) {
+    echo "setting read error   : " . $e->getMessage() . "\n";
+}
+
+// 2) automation_config / custom buttons ---------------------------------------
+echo "\n--- automation_config (raw column) ---\n";
+try {
+    $raw = $pdo->query("SELECT automation_config FROM setting LIMIT 1")->fetchColumn();
+    echo var_export($raw, true) . "\n";
+} catch (Throwable $e) {
+    echo "read error: " . $e->getMessage() . "\n";
+}
+
+echo "\n--- get_automation_config(0) ---\n";
+$cfg = get_automation_config(0);
+echo "buttons count: " . count($cfg['buttons'] ?? []) . "\n";
+print_r($cfg['buttons'] ?? 'no buttons key');
+
+echo "\n--- automation_buttons(0) (normalised) ---\n";
+print_r(automation_buttons(0));
+
+// 3) Write test ----------------------------------------------------------------
+if (isset($_GET['writetest'])) {
+    echo "\n--- WRITE TEST ---\n";
+    $cfg = get_automation_config(0);
+    $cfg['buttons'][] = [
+        'id' => 'diag' . substr(md5(microtime()), 0, 6),
+        'label' => 'تست تشخیص ' . date('H:i:s'),
+        'event' => 'custom.trigger',
+        'message' => 'این یک دکمه تستی است',
+        'url' => '',
+        'active' => true,
+    ];
+    $ok = set_automation_config($cfg, 0);
+    echo "set_automation_config returned: " . var_export($ok, true) . "\n";
+    // re-read straight from DB
+    $raw = $pdo->query("SELECT automation_config FROM setting LIMIT 1")->fetchColumn();
+    echo "DB now has: " . $raw . "\n";
+    echo "\n>>> If buttons count went up here but NOT on keyboard.php, it's a read/cache issue.\n";
+    echo ">>> If set_... returned true but DB did NOT change, it's a WRITE issue (no setting row?).\n";
+}
+
+// 4) Main keyboard -------------------------------------------------------------
+echo "\n--- setting.keyboardmain (bot main menu) ---\n";
+try {
+    $km = $pdo->query("SELECT keyboardmain FROM setting LIMIT 1")->fetchColumn();
+    echo $km . "\n";
+} catch (Throwable $e) {
+    echo "read error: " . $e->getMessage() . "\n";
+}
+
+// 5) Does a setting row even exist? -------------------------------------------
+echo "\n--- setting table rows ---\n";
+try {
+    $n = (int) $pdo->query("SELECT COUNT(*) FROM setting")->fetchColumn();
+    echo "setting row count: $n\n";
+} catch (Throwable $e) {
+    echo "count error: " . $e->getMessage() . "\n";
+}
+
+echo "\n=== END. Add ?writetest=1 to the URL to run a write test. ===\n";
