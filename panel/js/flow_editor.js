@@ -432,6 +432,27 @@
 
     // ---- type-specific blocks ----
     if (d.type === 'button') {
+      // Current display mode: how this node's CHILDREN are shown.
+      //   'inline' → glass buttons (callback_data) under the message
+      //   'reply'  → bottom reply-keyboard buttons (plain text)
+      //   'both'   → both at once
+      var dm = (cfg.display_mode === 'reply' || cfg.display_mode === 'both' || cfg.display_mode === 'inline')
+        ? cfg.display_mode : 'inline';
+      var dmInline = (dm === 'inline' || dm === 'both');
+      var dmReply  = (dm === 'reply'  || dm === 'both');
+      // Toggle one of the two checkboxes while guaranteeing at least one stays on.
+      function setDisplayFlag(which, on) {
+        var inl = dmInline, rep = dmReply;
+        if (which === 'inline') inl = on; else rep = on;
+        // Never allow "neither": if the user just turned the last one off,
+        // force the OTHER mode on instead.
+        if (!inl && !rep) {
+          if (which === 'inline') rep = true; else inl = true;
+        }
+        var next = (inl && rep) ? 'both' : (inl ? 'inline' : 'reply');
+        setCfg('display_mode', next);
+      }
+
       rows.push(h('div', { className: 'grp', key: 'gbtn' },
         h('div', { className: 'grp-t' }, 'دکمه‌های راهبری خودکار'),
         h('label', { className: 'chk' },
@@ -440,6 +461,24 @@
         h('label', { className: 'chk' },
           h('input', { type: 'checkbox', checked: !!cfg.auto_home, onChange: function (e) { setCfg('auto_home', e.target.checked); } }),
           'دکمهٔ «منوی اصلی» خودکار اضافه شود')
+      ));
+
+      rows.push(h('div', { className: 'grp', key: 'gdisp' },
+        h('div', { className: 'grp-t' }, 'نحوهٔ نمایش دکمه‌های فرزند'),
+        h('label', { className: 'chk' },
+          h('input', {
+            type: 'checkbox', checked: dmInline,
+            onChange: function (e) { setDisplayFlag('inline', e.target.checked); }
+          }),
+          'پنل شیشه‌ای (زیر پیام، inline)'),
+        h('label', { className: 'chk' },
+          h('input', {
+            type: 'checkbox', checked: dmReply,
+            onChange: function (e) { setDisplayFlag('reply', e.target.checked); }
+          }),
+          'پنل کشویی (کیبورد پایین، reply)'),
+        h('div', { className: 'hlp' },
+          'می‌توانید یکی یا هر دو را انتخاب کنید؛ اما همیشه حداقل یکی باید فعال باشد. اگر هر دو فعال باشد، دکمه‌ها هم به‌صورت شیشه‌ای و هم کشویی نمایش داده می‌شوند.')
       ));
     }
 

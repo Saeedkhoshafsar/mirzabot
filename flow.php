@@ -690,6 +690,16 @@ function flow_normalise_config(array $c, $type)
         'url'           => (string) ($c['url'] ?? ''),
         'auto_back'     => !empty($c['auto_back']),
         'auto_home'     => !empty($c['auto_home']),
+        // How this node's CHILDREN are presented to the user:
+        //   'inline' → glass buttons under the message (callback_data)
+        //   'reply'  → bottom reply-keyboard buttons (plain text)
+        //   'both'   → both at once
+        // Default 'inline' keeps the previous behaviour. At least one mode is
+        // always guaranteed (an invalid/empty value falls back to 'inline').
+        'display_mode'  => (function ($m) {
+            $m = is_string($m) ? strtolower(trim($m)) : '';
+            return in_array($m, ['inline', 'reply', 'both'], true) ? $m : 'inline';
+        })($c['display_mode'] ?? 'inline'),
     ];
     // Link back to a legacy automation custom button (set during migration). Kept
     // through every normalise so the panel can sync edits/deletes to the legacy
