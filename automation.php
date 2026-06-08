@@ -155,11 +155,23 @@ function set_automation_config(array $cfg, $bot_id = null)
                 $bset = [];
             }
             $bset['automation_config'] = $cfg;
-            return $pdo->prepare("UPDATE botsaz SET setting = ? WHERE id = ?")
+            $ok = $pdo->prepare("UPDATE botsaz SET setting = ? WHERE id = ?")
                 ->execute([json_encode($bset, JSON_UNESCAPED_UNICODE), (int) $bot_id]);
+            if (function_exists('clearSelectCache')) {
+                clearSelectCache('botsaz');
+            }
+            return $ok;
         }
-        return $pdo->prepare("UPDATE setting SET automation_config = ?")
+        $ok = $pdo->prepare("UPDATE setting SET automation_config = ?")
             ->execute([json_encode($cfg, JSON_UNESCAPED_UNICODE)]);
+        // The raw UPDATE above bypasses update(), so the per-request select()
+        // cache for `setting` is NOT auto-invalidated. Clear it so a read later
+        // in the SAME request (e.g. the redirect target re-reading buttons)
+        // returns the freshly-saved value instead of a stale cached one.
+        if (function_exists('clearSelectCache')) {
+            clearSelectCache('setting');
+        }
+        return $ok;
     } catch (Exception $e) {
         error_log("set_automation_config error: " . $e->getMessage());
         return false;
