@@ -6,6 +6,7 @@
 // -----------------------------------------------------------------------------
 require_once __DIR__ . '/inc/config.php';
 require_once __DIR__ . '/../automation.php';
+require_once __DIR__ . '/../flow.php';
 require_auth();
 
 header('Content-Type: text/plain; charset=utf-8');
@@ -42,6 +43,69 @@ print_r($cfg['buttons'] ?? 'no buttons key');
 
 echo "\n--- automation_buttons(0) (normalised) ---\n";
 print_r(automation_buttons(0));
+
+// 2b) BUTTON FLOW (Step 12, Phase 1) ------------------------------------------
+echo "\n\n=== BUTTON FLOW (Phase 1: data layer) ===\n";
+echo "flow.php loaded         : " . (function_exists('get_button_flow') ? 'yes' : 'NO') . "\n";
+try {
+    $cols = $pdo->query("SHOW COLUMNS FROM setting LIKE 'button_flow%'")->fetchAll(PDO::FETCH_COLUMN);
+    echo "setting columns         : " . (empty($cols) ? '(missing — open panel/index.php once to run table.php)' : implode(', ', $cols)) . "\n";
+} catch (Throwable $e) {
+    echo "columns read error      : " . $e->getMessage() . "\n";
+}
+foreach (['button_flow_history', 'button_flow_state'] as $t) {
+    try {
+        $exists = $pdo->query("SELECT 1 FROM information_schema.tables WHERE table_name = '$t'")->fetchColumn();
+        echo "table $t : " . ($exists ? 'exists' : 'MISSING') . "\n";
+    } catch (Throwable $e) {
+        echo "table $t : err " . $e->getMessage() . "\n";
+    }
+}
+
+$tree = get_button_flow(0);
+echo "\ncurrent tree nodes      : " . count($tree['nodes']) . "\n";
+echo "current tree edges      : " . count($tree['edges']) . "\n";
+echo "root id                 : " . flow_root_id($tree) . "\n";
+echo "flow_is_active(0)       : " . var_export(flow_is_active(0), true) . "\n";
+
+echo "\n--- legacy → tree preview (NOT saved) ---\n";
+$preview = flow_build_from_legacy(0);
+echo "preview nodes           : " . count($preview['nodes']) . " (root + legacy buttons)\n";
+foreach ($preview['nodes'] as $n) {
+    echo "   [" . $n['type'] . "] " . $n['label'] . ($n['system'] ? '  (system)' : '') . "\n";
+}
+
+// Phase-1 self test: build the خرید tree, validate, save, read back, history.
+if (isset($_GET['flowtest'])) {
+    echo "\n--- FLOW SELF-TEST (?flowtest=1) ---\n";
+    $t = flow_default_tree();
+    $mk = function ($id, $label, $parent, $type = 'button') {
+        return [
+            'id' => $id, 'type' => $type, 'label' => $label, 'parent' => $parent,
+            'system' => false, 'position' => ['x' => 0, 'y' => 0],
+            'config' => flow_normalise_config([], $type),
+        ];
+    };
+    $t['nodes'][] = $mk('buy', 'خرید', 'n_root');
+    $t['nodes'][] = $mk('cash', 'نقدی', 'buy');
+    $t['nodes'][] = $mk('inst', 'قسطی', 'buy');
+    $t['nodes'][] = $mk('m3', '۳ ماهه', 'inst');
+    $t['nodes'][] = $mk('m6', '۶ ماهه', 'inst');
+    foreach ([['n_root','buy'],['buy','cash'],['buy','inst'],['inst','m3'],['inst','m6']] as $e) {
+        $t['edges'][] = ['id' => 'e_' . $e[0] . '_' . $e[1], 'source' => $e[0], 'target' => $e[1]];
+    }
+    $v = flow_validate_tree($t);
+    echo "validate              : " . json_encode($v, JSON_UNESCAPED_UNICODE) . "\n";
+    $res = set_button_flow($t, 0, 'diag flowtest', 'diag');
+    echo "save ok               : " . var_export($res['ok'], true) . " err=" . var_export($res['error'], true) . "\n";
+    $back = get_button_flow(0);
+    echo "read back nodes       : " . count($back['nodes']) . "\n";
+    echo "children of خرید      : " . implode(', ', array_map(fn($c) => $c['label'], flow_children($back, 'buy'))) . "\n";
+    echo "children of قسطی      : " . implode(', ', array_map(fn($c) => $c['label'], flow_children($back, 'inst'))) . "\n";
+    echo "history revisions     : " . count(flow_history_list(0)) . "\n";
+    echo "\n>>> If save ok=true and children match (نقدی/قسطی and ۳ ماهه/۶ ماهه),\n";
+    echo ">>> Phase 1 (data layer) works end-to-end on production.\n";
+}
 
 // 3) Write test ----------------------------------------------------------------
 if (isset($_GET['writetest'])) {

@@ -317,6 +317,56 @@ timeauto_not_verify,status_keyboard_config,cron_status
     // existing installs are completely unaffected.
     addFieldToTable("setting", "automation_config", "{}", "TEXT");
 
+    // --- Visual Button Flow (Step 12) ---
+    // The whole bot menu is modelled as a node tree (React Flow nodes+edges).
+    // button_flow      : the live tree {nodes:[...],edges:[...],meta:{...}}
+    // button_flow_meta : small bookkeeping {updated_at, ...}
+    // Empty {} = no flow yet (bot keeps using its built-in menu untouched).
+    addFieldToTable("setting", "button_flow", "{}", "LONGTEXT");
+    addFieldToTable("setting", "button_flow_meta", "{}", "TEXT");
+
+    // Version history for the button flow: every save snapshots the previous
+    // tree so the admin can undo / roll back to an earlier revision. Kept
+    // trimmed to the most recent N rows (see flow.php). Created only if missing.
+    $tableName = 'button_flow_history';
+    $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_name = :tableName");
+    $stmt->bindParam(':tableName', $tableName);
+    $stmt->execute();
+    if (!$stmt->fetch(PDO::FETCH_ASSOC)) {
+        $pdo->prepare("CREATE TABLE button_flow_history (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            bot_id INT NOT NULL DEFAULT 0,
+            tree LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+            note VARCHAR(255) NOT NULL DEFAULT '',
+            node_count INT NOT NULL DEFAULT 0,
+            created_at VARCHAR(30) NOT NULL DEFAULT '',
+            created_by VARCHAR(100) NOT NULL DEFAULT ''
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci")->execute();
+    }
+
+    // Per-user runtime state for traversing the flow at chat time:
+    // where the user currently is in the tree, the breadcrumb path taken, and
+    // any inputs collected (for n8n payloads / conditions). Created only if missing.
+    $tableName = 'button_flow_state';
+    $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_name = :tableName");
+    $stmt->bindParam(':tableName', $tableName);
+    $stmt->execute();
+    if (!$stmt->fetch(PDO::FETCH_ASSOC)) {
+        $pdo->prepare("CREATE TABLE button_flow_state (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            bot_id INT NOT NULL DEFAULT 0,
+            user_id VARCHAR(50) NOT NULL DEFAULT '',
+            current_node VARCHAR(64) NOT NULL DEFAULT '',
+            await_node VARCHAR(64) NOT NULL DEFAULT '',
+            path_json TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+            inputs_json TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+            attempts INT NOT NULL DEFAULT 0,
+            attempts_reset_at VARCHAR(30) NOT NULL DEFAULT '',
+            updated_at VARCHAR(30) NOT NULL DEFAULT '',
+            UNIQUE KEY uq_bot_user (bot_id, user_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci")->execute();
+    }
+
     // Automation delivery log: one row per outbound webhook attempt (for the
     // panel's "recent deliveries" view + retry/debug). Created only if missing.
     $tableName = 'automation_log';
