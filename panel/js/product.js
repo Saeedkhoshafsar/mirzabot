@@ -127,6 +127,19 @@ function applyTypeVisibility(which, ptype) {
     });
 }
 
+// Update the placeholder text of shared fields (name/category/note) to match
+// the example sentences declared for the chosen product type in product_types().
+function applyTypeExamples(which, ptype) {
+    var modal = document.getElementById(which + 'Modal');
+    var scope = modal || document;
+    var types = window.PRODUCT_TYPES || {};
+    var ex = (types[ptype] && types[ptype].examples) || {};
+    scope.querySelectorAll('[data-example]').forEach(function (el) {
+        var key = el.getAttribute('data-example');
+        if (ex[key]) el.setAttribute('placeholder', ex[key]);
+    });
+}
+
 window.renderAttrFields = function (which, values) {
     values = values || {};
     var typeSel = document.getElementById(which + '_ptype');
@@ -135,6 +148,9 @@ window.renderAttrFields = function (which, values) {
 
     // First, toggle the static VPN-only fields for the selected type.
     applyTypeVisibility(which, typeSel.value);
+    // Update placeholders of the shared name/category/note fields so the
+    // examples always match the chosen product type (no stale "50GB" hints).
+    applyTypeExamples(which, typeSel.value);
 
     var types = window.PRODUCT_TYPES || {};
     var def = types[typeSel.value];

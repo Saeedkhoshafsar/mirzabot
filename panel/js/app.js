@@ -184,8 +184,16 @@ window.closeModal = function (id) {
     if (m) m.classList.remove('open');
 };
 
+// Close a modal only when BOTH mousedown and mouseup land on the veil itself.
+// This prevents the form from closing when the user double-clicks / drag-selects
+// text inside an input and the mouseup happens to land just outside it.
 document.querySelectorAll('.modal-veil').forEach(function (v) {
-    v.addEventListener('click', function (e) { if (e.target === v) v.classList.remove('open'); });
+    var downOnVeil = false;
+    v.addEventListener('mousedown', function (e) { downOnVeil = (e.target === v); });
+    v.addEventListener('mouseup', function (e) {
+        if (downOnVeil && e.target === v) v.classList.remove('open');
+        downOnVeil = false;
+    });
 });
 
 document.addEventListener('keydown', function (e) {

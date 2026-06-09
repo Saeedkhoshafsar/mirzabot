@@ -221,7 +221,7 @@ include __DIR__ . '/inc/layout_head.php';
 
           <div class="field full">
             <label><?= $textbotlang['panel']['productNameLabel'] ?></label>
-            <input type="text" name="name_product" id="add_name" class="input" placeholder="<?= htmlspecialchars($textbotlang['panel']['productNameExample']) ?>" required>
+            <input type="text" name="name_product" id="add_name" data-example="name" class="input" placeholder="<?= htmlspecialchars($textbotlang['panel']['productNameExample']) ?>" required>
           </div>
           <div class="field">
             <label><?= $textbotlang['panel']['productPriceLabel'] ?></label>
@@ -250,7 +250,7 @@ include __DIR__ . '/inc/layout_head.php';
 
           <div class="field">
             <label><?= $textbotlang['panel']['productCategoryLabel'] ?></label>
-            <input type="text" name="cetegory_product" class="input" placeholder="<?= htmlspecialchars($textbotlang['panel']['productTypeExample']) ?>">
+            <input type="text" name="cetegory_product" data-example="category" class="input" placeholder="<?= htmlspecialchars($textbotlang['panel']['productTypeExample']) ?>">
           </div>
           <div class="field">
             <label><?= $textbotlang['panel']['productTypeLabel'] ?></label>
@@ -262,7 +262,7 @@ include __DIR__ . '/inc/layout_head.php';
           </div>
           <div class="field full">
             <label><?= $textbotlang['panel']['productNoteLabel'] ?></label>
-            <input type="text" name="note_product" class="input" placeholder="<?= htmlspecialchars($textbotlang['panel']['productDescriptionOptional']) ?>">
+            <input type="text" name="note_product" data-example="note" class="input" placeholder="<?= htmlspecialchars($textbotlang['panel']['productDescriptionOptional']) ?>">
           </div>
 
           <!-- type-specific attribute fields rendered by renderAttrFields() -->
@@ -306,48 +306,7 @@ include __DIR__ . '/inc/layout_head.php';
         <input type="hidden" name="action" value="edit">
         <input type="hidden" name="edit_id" id="edit_id">
         <div class="form-grid">
-          <div class="field full">
-            <label><?= $textbotlang['panel']['productDetailName'] ?></label>
-            <input type="text" name="name_product" id="edit_name" class="input" required>
-          </div>
-          <div class="field">
-            <label><?= $textbotlang['panel']['productDetailVolume'] ?></label>
-            <input type="number" name="price_product" id="edit_price" class="input" min="0">
-          </div>
-          <div class="field">
-            <label><?= $textbotlang['panel']['productVolumeLabel'] ?></label>
-            <input type="number" name="volume_product" id="edit_volume" class="input" min="0">
-          </div>
-          <div class="field">
-            <label><?= $textbotlang['panel']['productDetailTime'] ?></label>
-            <input type="number" name="time_product" id="edit_time" class="input" min="0">
-          </div>
-          <div class="field">
-            <label><?= $textbotlang['panel']['productDetailPrice'] ?></label>
-            <input type="text" name="cetegory_product" id="edit_cat" class="input">
-          </div>
-          <div class="field">
-            <label><?= $textbotlang['panel']['productDetailType'] ?></label>
-            <select name="namepanel" id="edit_panel" class="select">
-              <option value=""><?= $textbotlang['panel']['productDetailLocation'] ?></option>
-              <?php foreach ($panels as $pl): ?>
-                <option value="<?= htmlspecialchars($pl['name_panel'] ?? $pl['id']) ?>">
-                  <?= htmlspecialchars($pl['name_panel'] ?? $pl['id']) ?>
-                </option><?php endforeach; ?>
-            </select>
-          </div>
-          <div class="field">
-            <label><?= $textbotlang['panel']['productDetailCategory'] ?></label>
-            <select name="agent_product" id="edit_agent" class="select">
-              <option value="f"><?= $textbotlang['panel']['productDetailDescription'] ?></option>
-              <option value="n"><?= $textbotlang['panel']['productDetailNote'] ?></option>
-              <option value="n2"><?= $textbotlang['panel']['productCloseBtn'] ?></option>
-            </select>
-          </div>
-          <div class="field full">
-            <label><?= $textbotlang['panel']['productUnlimitedLabel'] ?></label>
-            <input type="text" name="note_product" id="edit_note" class="input">
-          </div>
+          <!-- product type FIRST, same as the add form -->
           <div class="field full">
             <label>نوع محصول</label>
             <select name="product_type" id="edit_ptype" class="select" onchange="renderAttrFields('edit')">
@@ -356,17 +315,64 @@ include __DIR__ . '/inc/layout_head.php';
               <?php endforeach; ?>
             </select>
           </div>
+
+          <div class="field full">
+            <label>نام محصول *</label>
+            <input type="text" name="name_product" id="edit_name" data-example="name" class="input" required>
+          </div>
+          <div class="field">
+            <label>قیمت (تومان)</label>
+            <input type="number" name="price_product" id="edit_price" class="input" min="0">
+          </div>
+
+          <!-- VPN-only fields: hidden for physical/digital/etc. -->
+          <div class="field vpn-only" data-ptype-only="vpn">
+            <label>حجم (GB)</label>
+            <input type="number" name="volume_product" id="edit_volume" class="input" min="0">
+          </div>
+          <div class="field vpn-only" data-ptype-only="vpn">
+            <label>مدت (روز)</label>
+            <input type="number" name="time_product" id="edit_time" class="input" min="0">
+          </div>
+          <div class="field vpn-only" data-ptype-only="vpn">
+            <label>پنل</label>
+            <select name="namepanel" id="edit_panel" class="select">
+              <option value="">— انتخاب نشده —</option>
+              <?php foreach ($panels as $pl): ?>
+                <option value="<?= htmlspecialchars($pl['name_panel'] ?? $pl['id']) ?>">
+                  <?= htmlspecialchars($pl['name_panel'] ?? $pl['id']) ?>
+                </option><?php endforeach; ?>
+            </select>
+          </div>
+
+          <div class="field">
+            <label>دسته‌بندی</label>
+            <input type="text" name="cetegory_product" id="edit_cat" data-example="category" class="input">
+          </div>
+          <div class="field">
+            <label>نوع کاربر</label>
+            <select name="agent_product" id="edit_agent" class="select">
+              <option value="f">کاربر عادی</option>
+              <option value="n">نماینده</option>
+              <option value="n2">نماینده پیشرفته</option>
+            </select>
+          </div>
+          <div class="field full">
+            <label>پیام/توضیح (اختیاری)</label>
+            <input type="text" name="note_product" id="edit_note" data-example="note" class="input">
+          </div>
+
           <div class="field full" id="edit_attr" style="display:flex;flex-direction:column;gap:12px"></div>
           <div class="field full">
             <a href="#" id="edit_media_link" class="btn btn-ghost" style="width:100%;justify-content:center">
-              <?= icon('image', 14) ?> مدیریت تصاویر، ویدیو و صوت این محصول
+              <?= icon('image', 14) ?> مدیریت/افزودن تصویر، ویدیو و صوت این محصول
             </a>
           </div>
         </div>
       </div>
       <div class="modal-foot">
-        <button type="submit" class="btn btn-primary"><?= icon('check', 13) ?> <?= $textbotlang['panel']['productDayUnit'] ?></button>
-        <button type="button" class="btn btn-ghost" onclick="closeModal('editModal')"><?= $textbotlang['panel']['productTomanUnit'] ?></button>
+        <button type="submit" class="btn btn-primary"><?= icon('check', 13) ?> ذخیره تغییرات</button>
+        <button type="button" class="btn btn-ghost" onclick="closeModal('editModal')">انصراف</button>
       </div>
     </form>
   </div>

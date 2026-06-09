@@ -1854,10 +1854,20 @@ function product_types()
     return [
         'vpn' => [
             'label'  => 'سرویس VPN (پیش‌فرض)',
+            'examples' => [
+                'name'     => 'مثلاً: ۵۰ گیگ یک ماهه',
+                'category' => 'مثلاً: اشتراک، نمایندگی',
+                'note'     => 'توضیح کوتاه دربارهٔ سرویس (اختیاری)',
+            ],
             'fields' => [], // handled by dedicated legacy columns
         ],
         'physical' => [
             'label'  => 'کالای فیزیکی',
+            'examples' => [
+                'name'     => 'مثلاً: هدفون بلوتوثی مدل X',
+                'category' => 'مثلاً: لوازم جانبی، پوشاک',
+                'note'     => 'توضیح کالا، مشخصات فنی… (اختیاری)',
+            ],
             'fields' => [
                 ['key' => 'brand',         'label' => 'برند', 'type' => 'text', 'hint' => 'اختیاری'],
                 ['key' => 'sku',           'label' => 'کد انبار (SKU)', 'type' => 'text', 'hint' => 'اختیاری'],
@@ -1889,6 +1899,11 @@ function product_types()
         ],
         'digital_file' => [
             'label'  => 'فایل دیجیتال',
+            'examples' => [
+                'name'     => 'مثلاً: کتاب صوتی، قالب آماده',
+                'category' => 'مثلاً: کتاب، قالب، نرم‌افزار',
+                'note'     => 'توضیح فایل و کاربرد آن (اختیاری)',
+            ],
             'fields' => [
                 ['key' => 'file_id',   'label' => 'شناسهٔ فایل تلگرام (file_id)', 'type' => 'text',     'hint' => 'فایل پس از خرید ارسال می‌شود'],
                 ['key' => 'file_type', 'label' => 'نوع فایل', 'type' => 'select', 'hint' => '',
@@ -1903,12 +1918,22 @@ function product_types()
         ],
         'serial_code' => [
             'label'  => 'کد/سریال (لایسنس)',
+            'examples' => [
+                'name'     => 'مثلاً: لایسنس آنتی‌ویروس ۱ ساله',
+                'category' => 'مثلاً: لایسنس، گیفت‌کارت',
+                'note'     => 'توضیح نحوهٔ فعال‌سازی کد (اختیاری)',
+            ],
             'fields' => [
                 ['key' => 'code_format', 'label' => 'قالب نمایش کد', 'type' => 'text', 'hint' => 'مثلاً: کد شما: {code}'],
             ],
         ],
         'service' => [
             'label'  => 'خدمت/سرویس عمومی',
+            'examples' => [
+                'name'     => 'مثلاً: طراحی لوگو، مشاوره',
+                'category' => 'مثلاً: خدمات، مشاوره',
+                'note'     => 'توضیح خدمت و نحوهٔ ارائه (اختیاری)',
+            ],
             'fields' => [
                 ['key' => 'delivery_note', 'label' => 'توضیح تحویل', 'type' => 'textarea', 'hint' => 'متنی که پس از خرید نمایش داده می‌شود'],
             ],
