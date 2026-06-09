@@ -2024,32 +2024,24 @@ function product_types()
                 // colors), each variant carries its own code, stock, price & image,
                 // and the single SKU/stock above are ignored.
                 ['key' => 'has_variants', 'label' => 'این محصول پس‌کد/تنوع دارد (چند رنگ/سایز)', 'type' => 'bool',
-                 'hint' => 'با تیک‌زدن، جدول تنوع فعال می‌شود و می‌توانید برای هر رنگ پس‌کد، موجودی، قیمت و تصویر جدا ثبت کنید.'],
+                 'hint' => 'با تیک‌زدن، می‌توانید ویژگی‌های دلخواه (رنگ، سایز، جنس، …) را خودتان بسازید و برای هر تنوع پس‌کد، موجودی، قیمت و تصویر جدا ثبت کنید.'],
 
-                // Variant schema picker (custom, category-like template). Shown
-                // only when has_variants is checked. Lets the merchant choose
-                // which custom columns the variants table shows for THIS product:
-                // clothing → رنگ/سایز/جنس/پس‌کد, cosmetics → حجم/شِید, … When left
-                // on "پیش‌فرض" the built-in پس‌کد/رنگ/سایز columns below are used.
-                ['key' => '_variant_schema', 'label' => 'قالب تنوع (ستون‌های دلخواه)', 'type' => 'variant_schema',
+                // Variants: an INLINE attribute builder. The seller defines the
+                // columns themselves with "افزودن ویژگی" (pick type text/number/
+                // image/select + a name), so each product gets exactly the fields
+                // it needs (clothing → رنگ/سایز/جنس, cosmetics → حجم/شِید, …).
+                // The built columns are stored per-product in attributes._variant_cols;
+                // موجودی/اختلاف قیمت are appended automatically. Shown only when
+                // has_variants is ticked (data-show-when).
+                ['key' => 'variants', 'label' => 'تنوع محصول (ویژگی‌های دلخواه)', 'type' => 'repeater',
                  'show_when' => 'has_variants',
-                 'hint' => 'برای هر دستهٔ کالا (لباس، آرایشی، لوازم خانگی…) می‌توانید در «مدیریت قالب‌های تنوع» ستون‌های دلخواه بسازید و اینجا انتخاب کنید. ستون‌های موجودی/اختلاف قیمت/تصویر همیشه به‌صورت خودکار اضافه می‌شوند.'],
-
-                // Variants: shown only when has_variants is checked (data-show-when).
-                // Columns are rendered dynamically from the chosen schema
-                // (see _variant_schema); the 'columns' list below is the default
-                // fallback used when no schema is selected.
-                ['key' => 'variants', 'label' => 'تنوع محصول (رنگ/سایز/پس‌کد)', 'type' => 'repeater',
-                 'show_when' => 'has_variants',
-                 'dynamic_columns' => true, // columns come from the selected schema (JS)
-                 'hint' => 'برای هر رنگ/سایز یک ردیف بسازید. پس‌کد مثل ۲۳۴۵-۱، ۲۳۴۵-۲. برای هر ردیف می‌توانید یک تصویر مجزا آپلود کنید. در ستون‌های لیستی می‌توانید از مقادیر آماده انتخاب کنید یا «مقدار دلخواه…» را بزنید.',
+                 'dynamic_columns' => true,  // columns built inline by the seller (JS)
+                 'builder' => true,          // show the "+ افزودن ویژگی" column builder
+                 'hint' => 'ابتدا با «+ افزودن ویژگی» ستون‌های دلخواه را بسازید (نوع: متن، عدد، تصویر یا لیست انتخابی). سپس برای هر تنوع یک ردیف اضافه کنید. ستون‌های موجودی و اختلاف قیمت خودکار اضافه می‌شوند. وقتی بیش از یک تنوع داشته باشید، نشان «پس‌کد دارد» ظاهر می‌شود و می‌توانید برای هر تنوع تصویر مجزا بگذارید.',
+                 // Fallback columns used only if the seller adds none.
                  'columns' => [
-                    ['key' => 'variant_code', 'label' => 'پس‌کد', 'type' => 'text'],
-                    ['key' => 'color',      'label' => 'رنگ',           'type' => 'text'],
-                    ['key' => 'size',       'label' => 'سایز',          'type' => 'text'],
                     ['key' => 'stock',      'label' => 'موجودی',         'type' => 'number'],
                     ['key' => 'price_diff', 'label' => 'اختلاف قیمت (+/−)', 'type' => 'number'],
-                    ['key' => 'image',      'label' => 'تصویر این رنگ',   'type' => 'image'],
                  ],
                 ],
 
@@ -2190,12 +2182,25 @@ function set_product_type($product_id, $type, array $attributes = [], array $kee
         $variantSchemaId = 0;
     }
 
+    // Resolve per-product custom variant columns (_variant_cols). These are the
+    // attributes the seller built INLINE on the product form ("افزودن ویژگی"):
+    // each one is { key, label, type:[text|number|image|select], options?, allow_custom? }.
+    // They take precedence over a picked schema and let every product define its
+    // own variant columns (clothing → رنگ/سایز/جنس, cosmetics → حجم/شِید, …).
+    $variantCols = [];
+    if (isset($attributes['_variant_cols'])) {
+        $variantCols = variant_normalize_columns($attributes['_variant_cols']);
+    }
+
     $clean = [];
     if ($variantSchemaId > 0) {
         $clean['_variant_schema'] = $variantSchemaId;
     }
+    if (!empty($variantCols)) {
+        $clean['_variant_cols'] = $variantCols;
+    }
     foreach ($attributes as $k => $v) {
-        if ($k === '_variant_schema') {
+        if ($k === '_variant_schema' || $k === '_variant_cols') {
             continue; // handled above
         }
         if (!isset($fieldDefs[$k])) {
@@ -2210,11 +2215,15 @@ function set_product_type($product_id, $type, array $attributes = [], array $kee
                 continue;
             }
             // For the variants repeater, the allowed columns come from the
-            // selected variant schema (custom, per-category fields) rather
-            // than the static fallback declared above.
+            // seller's INLINE custom columns (_variant_cols) first; otherwise the
+            // selected variant schema; otherwise the static fallback declared above.
             $cols = $def['columns'] ?? [];
-            if (!empty($def['dynamic_columns']) && function_exists('variant_schema_columns')) {
-                $cols = variant_schema_columns($variantSchemaId);
+            if (!empty($def['dynamic_columns'])) {
+                if (!empty($variantCols)) {
+                    $cols = variant_columns_with_builtins($variantCols);
+                } elseif (function_exists('variant_schema_columns')) {
+                    $cols = variant_schema_columns($variantSchemaId);
+                }
             }
             $colKeys = [];
             foreach ($cols as $c) {
@@ -2232,6 +2241,22 @@ function set_product_type($product_id, $type, array $attributes = [], array $kee
                 $hasValue = false;
                 foreach ($row as $ck => $cv) {
                     if (!isset($colKeys[$ck])) {
+                        continue;
+                    }
+                    if (is_array($cv)) {
+                        // Multi-image cell: an array of slot urls. Keep non-empty
+                        // slots, re-indexed; counts as a value if any slot is set.
+                        $slots = [];
+                        foreach ($cv as $slot) {
+                            $slot = is_string($slot) ? trim($slot) : $slot;
+                            if ($slot !== '' && $slot !== null) {
+                                $slots[] = $slot;
+                            }
+                        }
+                        $cleanRow[$ck] = $slots;
+                        if (!empty($slots)) {
+                            $hasValue = true;
+                        }
                         continue;
                     }
                     $cv = is_string($cv) ? trim($cv) : $cv;
@@ -2755,8 +2780,65 @@ function product_media_handle_upload($pid, $files)
  * Save a single uploaded variant image (one $_FILES slot) and return its
  * relative URL (e.g. "uploads/products/variants/12_ab.jpg"), or null on failure.
  * Only images are accepted. Used for per-color/per-پس‌کد variant pictures.
+ *
+ * NOTE: kept for backward-compatibility. New code should use
+ * product_variant_file_save() which accepts a per-column allowed-format list
+ * (so the seller can upload PDF/Word/ZIP/… too, not just images).
  */
 function product_variant_image_save($pid, $tmp, $origName, $size, $error)
+{
+    return product_variant_file_save($pid, $tmp, $origName, $size, $error, ['jpg', 'png', 'webp', 'gif']);
+}
+
+/**
+ * Detect a variant upload against the format catalogue (variant_file_formats()).
+ * Returns [formatKey, ext] (e.g. ['pdf','pdf'] or ['jpg','jpg']) or null when the
+ * file's MIME / extension matches none of the catalogue entries.
+ *
+ * We match by MIME first (robust), then fall back to extension (covers cases
+ * where finfo is unavailable or returns a generic octet-stream for Office docs).
+ */
+function product_variant_file_detect($tmpPath, $origName = '')
+{
+    $cat = variant_file_formats();
+    $mime = null;
+    if (function_exists('finfo_open')) {
+        $f = finfo_open(FILEINFO_MIME_TYPE);
+        $mime = finfo_file($f, $tmpPath);
+        finfo_close($f);
+    } elseif (function_exists('mime_content_type')) {
+        $mime = mime_content_type($tmpPath);
+    }
+    $ext = strtolower(pathinfo((string) $origName, PATHINFO_EXTENSION));
+
+    // 1) MIME match.
+    if ($mime !== null) {
+        foreach ($cat as $key => $def) {
+            if (in_array($mime, $def['mimes'], true)) {
+                $useExt = ($ext !== '' && in_array($ext, $def['exts'], true)) ? $ext : $def['exts'][0];
+                return [$key, $useExt];
+            }
+        }
+    }
+    // 2) Extension fallback.
+    if ($ext !== '') {
+        foreach ($cat as $key => $def) {
+            if (in_array($ext, $def['exts'], true)) {
+                return [$key, $ext];
+            }
+        }
+    }
+    return null;
+}
+
+/**
+ * Save a single uploaded variant file (one $_FILES slot) and return its
+ * relative URL, or null on failure. $allowedFormats is a list of format keys
+ * from variant_file_formats() (e.g. ['pdf','doc'] or ['jpg','png']); the upload
+ * is rejected when its detected format is not in that list. An empty/omitted
+ * list means "any format in the catalogue is fine".
+ */
+function product_variant_file_save($pid, $tmp, $origName, $size, $error, $allowedFormats = [])
 {
     $pid = (int) $pid;
     if ($pid <= 0 || ($error ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
@@ -2766,13 +2848,14 @@ function product_variant_image_save($pid, $tmp, $origName, $size, $error)
     if ($size <= 0 || $size > 25 * 1024 * 1024) {
         return null;
     }
-    $detect = product_media_detect($tmp, $origName);
+    $detect = product_variant_file_detect($tmp, $origName);
     if ($detect === null) {
-        return null;
+        return null; // unknown / disallowed type
     }
-    [$mediaType, $ext] = $detect;
-    if ($mediaType !== 'image') {
-        return null; // variants only accept images (product_media_detect returns 'image')
+    [$fmtKey, $ext] = $detect;
+    $allowedFormats = variant_clean_formats($allowedFormats);
+    if (!empty($allowedFormats) && !in_array($fmtKey, $allowedFormats, true)) {
+        return null; // not one of the formats this column accepts
     }
     $dirAbs = __DIR__ . '/uploads/products/variants';
     $relPrefix = 'uploads/products/variants';
@@ -2791,7 +2874,14 @@ function product_variant_image_save($pid, $tmp, $origName, $size, $error)
 /**
  * After set_product_type(), merge any uploaded per-variant images into the
  * product's stored attributes. $variantFiles is the normalised
- * $_FILES['media_variant'] array (shape: [fieldKey][idx] => file fields).
+ * $_FILES['media_variant'] array.
+ *
+ * Supports BOTH layouts:
+ *   - legacy 2-level: media_variant[fieldKey][idx]              → attrs[field][idx]['image']
+ *   - new 4-level:    media_variant[fieldKey][idx][colKey][slot] → attrs[field][idx][colKey][slot]
+ *
+ * The 4-level form lets the seller build any number of image columns and
+ * several images per column (e.g. multiple photos for one color).
  * Returns the number of images saved.
  */
 function product_apply_variant_images($pid, $variantFiles)
@@ -2801,7 +2891,6 @@ function product_apply_variant_images($pid, $variantFiles)
     if ($pid <= 0 || !is_array($variantFiles) || !isset($pdo)) {
         return 0;
     }
-    // Load current attributes.
     try {
         $stmt = $pdo->prepare("SELECT attributes FROM product WHERE id = ?");
         $stmt->execute([$pid]);
@@ -2813,31 +2902,93 @@ function product_apply_variant_images($pid, $variantFiles)
     if (!is_array($attrs)) {
         $attrs = [];
     }
-    $saved = 0;
-    foreach ($variantFiles as $fieldKey => $rows) {
-        if (!is_array($rows) || !isset($attrs[$fieldKey]) || !is_array($attrs[$fieldKey])) {
-            continue;
-        }
-        // $_FILES nested layout: media_variant[fieldKey][idx] →
-        //   $variantFiles[fieldKey] has parallel arrays name/tmp_name/size/error keyed by idx.
-        $names = $rows['name'] ?? [];
-        $tmps  = $rows['tmp_name'] ?? [];
-        $sizes = $rows['size'] ?? [];
-        $errs  = $rows['error'] ?? [];
-        if (!is_array($names)) {
-            continue;
-        }
-        foreach ($names as $idx => $nm) {
-            if (($errs[$idx] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
-                continue;
-            }
-            $url = product_variant_image_save($pid, $tmps[$idx] ?? '', $nm, $sizes[$idx] ?? 0, $errs[$idx] ?? 0);
-            if ($url && isset($attrs[$fieldKey][$idx]) && is_array($attrs[$fieldKey][$idx])) {
-                $attrs[$fieldKey][$idx]['image'] = $url;
-                $saved++;
+
+    // Build a colKey → allowed-formats map from the product's own _variant_cols,
+    // so each upload is validated against exactly the formats the seller chose
+    // for that column (image columns → jpg/png/…, a "فایل" column → pdf/doc/…).
+    $colFormats = [];
+    if (!empty($attrs['_variant_cols'])) {
+        foreach (variant_normalize_columns($attrs['_variant_cols']) as $c) {
+            if (!empty($c['formats']) && is_array($c['formats'])) {
+                $colFormats[$c['key']] = $c['formats'];
             }
         }
     }
+
+    // Flatten the (possibly deeply) nested $_FILES sub-array into a list of
+    // [pathKeys[], name, tmp, size, error] entries. PHP normalises a nested file
+    // input into parallel trees under name/tmp_name/size/error.
+    $entries = [];
+    foreach ($variantFiles as $fieldKey => $node) {
+        if (!is_array($node) || !isset($node['name'])) {
+            continue;
+        }
+        $walk = function ($nameNode, $tmpNode, $sizeNode, $errNode, $path) use (&$walk, &$entries) {
+            if (is_array($nameNode)) {
+                foreach ($nameNode as $k => $sub) {
+                    $walk(
+                        $sub,
+                        is_array($tmpNode) ? ($tmpNode[$k] ?? null) : null,
+                        is_array($sizeNode) ? ($sizeNode[$k] ?? null) : null,
+                        is_array($errNode) ? ($errNode[$k] ?? null) : null,
+                        array_merge($path, [$k])
+                    );
+                }
+                return;
+            }
+            $entries[] = [
+                'path' => $path,
+                'name' => $nameNode,
+                'tmp'  => $tmpNode,
+                'size' => $sizeNode,
+                'err'  => $errNode,
+            ];
+        };
+        $walk($node['name'], $node['tmp_name'] ?? null, $node['size'] ?? null, $node['error'] ?? null, [$fieldKey]);
+    }
+
+    $saved = 0;
+    foreach ($entries as $e) {
+        if (($e['err'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+            continue;
+        }
+        $path = $e['path']; // e.g. [fieldKey, idx] or [fieldKey, idx, colKey, slot]
+        // Pick the allowed-format whitelist for this column (if any). 4-level
+        // paths carry the colKey at index 2; legacy 2-level uploads are images.
+        $allowed = [];
+        if (count($path) === 4 && isset($colFormats[$path[2]])) {
+            $allowed = $colFormats[$path[2]];
+        } elseif (count($path) === 2) {
+            $allowed = ['jpg', 'png', 'webp', 'gif'];
+        }
+        $url = product_variant_file_save($pid, $e['tmp'] ?? '', $e['name'] ?? '', $e['size'] ?? 0, $e['err'] ?? 0, $allowed);
+        if (!$url) {
+            continue;
+        }
+        if (count($path) === 2) {
+            // Legacy: store on the row's 'image' key.
+            [$fk, $idx] = $path;
+            if (isset($attrs[$fk][$idx]) && is_array($attrs[$fk][$idx])) {
+                $attrs[$fk][$idx]['image'] = $url;
+                $saved++;
+            }
+        } elseif (count($path) === 4) {
+            // New: attrs[field][idx][colKey][slot] = url
+            [$fk, $idx, $colKey, $slot] = $path;
+            if (!isset($attrs[$fk]) || !is_array($attrs[$fk])) {
+                $attrs[$fk] = [];
+            }
+            if (!isset($attrs[$fk][$idx]) || !is_array($attrs[$fk][$idx])) {
+                $attrs[$fk][$idx] = [];
+            }
+            if (!isset($attrs[$fk][$idx][$colKey]) || !is_array($attrs[$fk][$idx][$colKey])) {
+                $attrs[$fk][$idx][$colKey] = [];
+            }
+            $attrs[$fk][$idx][$colKey][$slot] = $url;
+            $saved++;
+        }
+    }
+
     if ($saved > 0) {
         try {
             $json = json_encode($attrs, JSON_UNESCAPED_UNICODE);
@@ -3132,6 +3283,214 @@ function variant_schema_columns($schemaId)
     $cols[] = ['key' => 'stock',      'label' => 'موجودی',          'type' => 'number'];
     $cols[] = ['key' => 'price_diff', 'label' => 'اختلاف قیمت (+/−)', 'type' => 'number'];
     $cols[] = ['key' => 'image',      'label' => 'تصویر این تنوع',   'type' => 'image'];
+    return $cols;
+}
+
+/**
+ * Catalogue of upload formats the seller may allow for a `file`/`image`
+ * variant column. Maps a short format key → [mime patterns, extensions, label].
+ * Used both to render the format picker and to validate uploads server-side.
+ */
+function variant_file_formats()
+{
+    return [
+        // images
+        'jpg'  => ['mimes' => ['image/jpeg'],                 'exts' => ['jpg', 'jpeg'], 'label' => 'JPG'],
+        'png'  => ['mimes' => ['image/png'],                  'exts' => ['png'],         'label' => 'PNG'],
+        'webp' => ['mimes' => ['image/webp'],                 'exts' => ['webp'],        'label' => 'WEBP'],
+        'gif'  => ['mimes' => ['image/gif'],                  'exts' => ['gif'],         'label' => 'GIF'],
+        // documents
+        'pdf'  => ['mimes' => ['application/pdf'],            'exts' => ['pdf'],         'label' => 'PDF'],
+        'doc'  => ['mimes' => ['application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'], 'exts' => ['doc', 'docx'], 'label' => 'Word'],
+        'xls'  => ['mimes' => ['application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'], 'exts' => ['xls', 'xlsx'], 'label' => 'Excel'],
+        'ppt'  => ['mimes' => ['application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'], 'exts' => ['ppt', 'pptx'], 'label' => 'PowerPoint'],
+        'txt'  => ['mimes' => ['text/plain'],                 'exts' => ['txt'],         'label' => 'Text'],
+        // archives
+        'zip'  => ['mimes' => ['application/zip', 'application/x-zip-compressed'], 'exts' => ['zip'], 'label' => 'ZIP'],
+        'rar'  => ['mimes' => ['application/x-rar-compressed', 'application/vnd.rar'], 'exts' => ['rar'], 'label' => 'RAR'],
+        // media
+        'mp4'  => ['mimes' => ['video/mp4'],                  'exts' => ['mp4'],         'label' => 'MP4 ویدیو'],
+        'mp3'  => ['mimes' => ['audio/mpeg'],                 'exts' => ['mp3'],         'label' => 'MP3 صوت'],
+    ];
+}
+
+/**
+ * Format catalogue trimmed for the browser (no MIME internals): exts + label +
+ * a "kind" hint (image|file) so the JS builder can offer image-only formats for
+ * image columns and the full list for generic file columns.
+ */
+function variant_file_formats_js()
+{
+    $imageKeys = ['jpg', 'png', 'webp', 'gif'];
+    $out = [];
+    foreach (variant_file_formats() as $key => $def) {
+        $out[$key] = [
+            'exts'  => $def['exts'],
+            'label' => $def['label'],
+            'kind'  => in_array($key, $imageKeys, true) ? 'image' : 'file',
+        ];
+    }
+    return $out;
+}
+
+/**
+ * Normalise the INLINE per-product custom variant columns (_variant_cols).
+ *
+ * The seller builds these directly on the product form via "افزودن ویژگی":
+ * for each attribute they pick a TYPE and a NAME (and optional placeholder,
+ * options, file formats, count…), so every product gets exactly the fields it
+ * needs — clothing → رنگ/سایز/جنس, a digital product → یک ستون «فایل PDF», …
+ *
+ * Accepts a JSON string or array. Each entry may contain:
+ *   { key?, label, type, placeholder?, required?,
+ *     options?, allow_custom?,           // select
+ *     images_count?,                      // image
+ *     formats?, files_count? }            // file
+ * type ∈ text | number | textarea | url | date | color | bool | select | image | file
+ *
+ * The universal stock/price-diff are added later by variant_columns_with_builtins().
+ *
+ * @return array Clean list of column defs (may be empty).
+ */
+function variant_normalize_columns($cols)
+{
+    if (is_string($cols)) {
+        $decoded = json_decode($cols, true);
+        $cols = is_array($decoded) ? $decoded : [];
+    }
+    if (!is_array($cols)) {
+        return [];
+    }
+    $allowed = ['text', 'number', 'textarea', 'url', 'date', 'color', 'bool', 'select', 'image', 'file'];
+    $reserved = ['stock', 'price_diff']; // appended automatically, never user-defined
+    $formatsCat = variant_file_formats();
+    $out = [];
+    $seen = [];
+    foreach ($cols as $c) {
+        if (!is_array($c)) {
+            continue;
+        }
+        $label = isset($c['label']) ? trim((string) $c['label']) : '';
+        if ($label === '') {
+            continue;
+        }
+        $type = isset($c['type']) ? (string) $c['type'] : 'text';
+        if (!in_array($type, $allowed, true)) {
+            $type = 'text';
+        }
+        // Derive a unique, safe key from key/label.
+        $key = isset($c['key']) ? trim((string) $c['key']) : '';
+        $key = variant_schema_slug($key !== '' ? $key : $label);
+        if ($key === '' || in_array($key, $reserved, true) || isset($seen[$key])) {
+            $base = ($key === '' || in_array($key, $reserved, true)) ? 'col' : $key;
+            $key = $base;
+            $i = 2;
+            while ($key === '' || isset($seen[$key]) || in_array($key, $reserved, true)) {
+                $key = $base . $i;
+                $i++;
+            }
+        }
+        $seen[$key] = true;
+
+        $col = ['key' => $key, 'label' => $label, 'type' => $type];
+
+        // Optional placeholder / hint shown inside the input to guide the seller.
+        $ph = isset($c['placeholder']) ? trim((string) $c['placeholder']) : '';
+        if ($ph !== '') {
+            $col['placeholder'] = mb_substr($ph, 0, 120);
+        }
+        // Optional "required" flag (front-end hint; storage keeps empty rows out anyway).
+        if (!empty($c['required'])) {
+            $col['required'] = 1;
+        }
+
+        if ($type === 'select') {
+            $opts = [];
+            $raw = $c['options'] ?? [];
+            if (is_string($raw)) {
+                $raw = preg_split('/[\r\n,]+/', $raw);
+            }
+            if (is_array($raw)) {
+                foreach ($raw as $o) {
+                    $o = trim((string) $o);
+                    if ($o !== '' && !in_array($o, $opts, true)) {
+                        $opts[] = $o;
+                    }
+                }
+            }
+            $col['options'] = $opts;
+            $ac = $c['allow_custom'] ?? 1;
+            $col['allow_custom'] = ($ac === 1 || $ac === '1' || $ac === true || $ac === 'on') ? 1 : 0;
+        }
+
+        if ($type === 'image') {
+            // How many separate images the seller may upload for this column
+            // (e.g. several photos per color). 1..10, default 1.
+            $n = isset($c['images_count']) ? (int) $c['images_count'] : 1;
+            $col['images_count'] = max(1, min(10, $n));
+            // images are implicitly the image formats; allow narrowing too.
+            $col['formats'] = variant_clean_formats($c['formats'] ?? ['jpg', 'png', 'webp', 'gif'], $formatsCat);
+            if (empty($col['formats'])) {
+                $col['formats'] = ['jpg', 'png', 'webp', 'gif'];
+            }
+        }
+
+        if ($type === 'file') {
+            // Generic file column. The admin picks one OR several allowed formats
+            // (pdf, doc, zip, …) and how many files may be uploaded per variant.
+            $col['formats'] = variant_clean_formats($c['formats'] ?? ['pdf'], $formatsCat);
+            if (empty($col['formats'])) {
+                $col['formats'] = ['pdf'];
+            }
+            $n = isset($c['files_count']) ? (int) $c['files_count'] : 1;
+            $col['files_count'] = max(1, min(10, $n));
+        }
+
+        $out[] = $col;
+    }
+    return $out;
+}
+
+/** Keep only known format keys (from variant_file_formats()), de-duplicated. */
+function variant_clean_formats($formats, $catalogue = null)
+{
+    if ($catalogue === null) {
+        $catalogue = variant_file_formats();
+    }
+    if (is_string($formats)) {
+        $formats = preg_split('/[\s,]+/', $formats);
+    }
+    if (!is_array($formats)) {
+        return [];
+    }
+    $out = [];
+    foreach ($formats as $f) {
+        $f = strtolower(trim((string) $f));
+        if ($f !== '' && isset($catalogue[$f]) && !in_array($f, $out, true)) {
+            $out[] = $f;
+        }
+    }
+    return $out;
+}
+
+/**
+ * Take the seller's inline custom columns and append the universal
+ * stock / price-diff columns (image columns are user-defined now, so they are
+ * NOT auto-added). Mirrors the JS variantBuilderColumns() so PHP validation and
+ * the rendered table agree on the column set.
+ */
+function variant_columns_with_builtins(array $customCols)
+{
+    $cols = [];
+    $reserved = ['stock', 'price_diff'];
+    foreach ($customCols as $c) {
+        if (isset($c['key']) && in_array($c['key'], $reserved, true)) {
+            continue;
+        }
+        $cols[] = $c;
+    }
+    $cols[] = ['key' => 'stock',      'label' => 'موجودی',          'type' => 'number'];
+    $cols[] = ['key' => 'price_diff', 'label' => 'اختلاف قیمت (+/−)', 'type' => 'number'];
     return $cols;
 }
 
