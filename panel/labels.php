@@ -212,31 +212,21 @@ include __DIR__ . '/inc/layout_head.php';
     </div>
 
     <!-- Button labels -->
-    <div class="card fade-up" style="margin-bottom:14px">
+    <div class="card fade-up" style="margin-bottom:14px;border-color:var(--ac,#3b82f6)">
         <div class="card-head">
             <div>
-                <div class="card-title">لیبل دکمه‌های ربات</div>
-                <div class="card-subtitle">متن دکمه‌ها را تغییر دهید (خالی = پیش‌فرض)</div>
+                <div class="card-title">🌳 تغییر نام دکمه‌های ربات منتقل شد</div>
+                <div class="card-subtitle">برای جلوگیری از سردرگمی، ویرایش نام دکمه‌ها حالا فقط در یک‌جا انجام می‌شود</div>
             </div>
         </div>
-        <div class="card-body" style="display:flex;flex-direction:column;gap:12px">
-            <?php foreach ($editableLabels as $key => $desc):
-                $default = bot_label_default($key, $lang);
-                $current = bot_label($key, $lang, $default, $botId);
-                $isOverridden = ($current !== $default);
-                ?>
-                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding-bottom:10px;border-bottom:1px solid var(--bd)">
-                    <div style="min-width:180px;font-size:.82rem;font-weight:600">
-                        <?= htmlspecialchars($desc) ?>
-                        <?php if ($isOverridden): ?>
-                            <span style="font-size:.68rem;color:var(--ac);font-weight:700">● ویرایش‌شده</span>
-                        <?php endif; ?>
-                        <div style="font-size:.68rem;color:var(--mute);font-weight:400">پیش‌فرض: <?= htmlspecialchars($default) ?></div>
-                    </div>
-                    <input type="text" name="labels[<?= $key ?>]" value="<?= htmlspecialchars($current) ?>"
-                        style="flex:1;min-width:200px;padding:10px;border-radius:8px;background:var(--sf2,var(--sf));color:var(--fg);border:1px solid var(--bd)">
-                </div>
-            <?php endforeach; ?>
+        <div class="card-body" style="line-height:1.9">
+            <div>تغییر متن دکمه‌های ربات (خرید، کیف پول، پشتیبانی و…) حالا مستقیماً داخل
+                <a href="flow.php" style="font-weight:700"><?= icon('settings', 14) ?> ویرایشگر دکمه‌ها (درختی)</a>
+                انجام می‌شود — کافی است روی همان دکمه دابل‌کلیک کنید و نامش را عوض کنید.</div>
+            <div style="margin-top:6px;color:var(--mute);font-size:.85rem">چرا؟ قبلاً نام دکمه‌ها هم اینجا و هم در ویرایشگر درختی قابل تغییر بود و این گیج‌کننده بود. حالا این صفحه فقط برای «واژگان فروشگاه» و «برندینگ» است؛ نام و چیدمان دکمه‌ها در درخت مدیریت می‌شود.</div>
+            <div style="margin-top:10px">
+                <a href="flow.php" class="btn btn-primary btn-sm"><?= icon('settings', 14) ?> رفتن به ویرایشگر دکمه‌ها</a>
+            </div>
         </div>
     </div>
 

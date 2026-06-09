@@ -525,6 +525,15 @@ function set_button_flow(array $tree, $bot_id = null, $note = '', $created_by = 
             flow_sync_legacy_buttons($tree, $bot_id);
         }
 
+        // 5) Persist any RENAME of a main-menu (system_menu) button back into the
+        //    label-override store, so editing the button text right inside the
+        //    tree node updates the real bot keyboard. This makes the tree editor
+        //    the single place to rename buttons (Audit-8); the «برندینگ» page now
+        //    only keeps store vocabulary. Best-effort, never blocks the save.
+        if ($ok) {
+            flow_sync_menu_labels($tree, $bot_id);
+        }
+
         return ['ok' => (bool) $ok, 'error' => null, 'tree' => $tree];
     } catch (Exception $e) {
         error_log("set_button_flow error: " . $e->getMessage());
@@ -1589,6 +1598,51 @@ function flow_sync_legacy_buttons(array $tree, $bot_id = null)
         }
     } catch (Throwable $e) {
         error_log('flow_sync_legacy_buttons error: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Persist renamed main-menu buttons from the tree back into the label-override
+ * store (bot_label). Each system_menu node carries a 'menu_key' (e.g.
+ * text_sell) which maps via flow_main_menu_map() to a language key (e.g. sell).
+ * When the node's label differs from the resolved default we store an override;
+ * when it equals the default we clear any override (stay clean). This makes the
+ * tree node the single place to rename a button (Audit-8).
+ *
+ * Best-effort: never throws; does nothing if the label helpers are missing.
+ */
+function flow_sync_menu_labels(array $tree, $bot_id = null)
+{
+    if (!function_exists('set_bot_label') || !function_exists('bot_label_default')) {
+        return;
+    }
+    $bot_id = flow_bot_id($bot_id);
+    $map = flow_main_menu_map();
+    $lang = 'fa'; // panel edits the default (Persian) labels, same as labels.php
+    try {
+        foreach ($tree['nodes'] as $n) {
+            if (($n['node_kind'] ?? '') !== 'system_menu') {
+                continue;
+            }
+            $menuKey = (string) ($n['menu_key'] ?? '');
+            if ($menuKey === '' || !isset($map[$menuKey])) {
+                continue;
+            }
+            $langKey = (string) $map[$menuKey]['lang'];
+            if ($langKey === '') {
+                continue;
+            }
+            $newLabel = trim((string) ($n['label'] ?? ''));
+            $default  = (string) bot_label_default($langKey, $lang);
+            if ($newLabel === '' || $newLabel === $default) {
+                // unchanged / cleared -> remove override to fall back to default
+                set_bot_label($langKey, $lang, null, $bot_id);
+            } else {
+                set_bot_label($langKey, $lang, $newLabel, $bot_id);
+            }
+        }
+    } catch (Throwable $e) {
+        error_log('flow_sync_menu_labels error: ' . $e->getMessage());
     }
 }
 

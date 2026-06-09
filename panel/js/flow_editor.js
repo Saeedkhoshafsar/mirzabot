@@ -541,7 +541,7 @@
 
     if (isMenu) {
       rows.push(h('div', { className: 'sys-warn', key: 'sw' },
-        'ℹ️ این دکمهٔ «منوی واقعی» ربات است. برچسب و رفتار اصلی آن به کد ربات وصل است و قابل تغییر نیست؛ اما می‌توانید نحوهٔ نمایش دکمه‌های فرزندی که خودتان اضافه کرده‌اید (شیشه‌ای/کشویی) و پنهان‌کردن پیام بومی را از پایین تنظیم کنید.'));
+        'ℹ️ این دکمهٔ «منوی واقعی» ربات است. می‌توانید نام (متن) دکمه را همین‌جا تغییر دهید — همین تغییر در کیبورد ربات اعمال می‌شود. رفتار اصلی دکمه به کد ربات وصل است و قابل تغییر نیست، اما می‌توانید دکمه‌های فرزند اضافه کنید و نحوهٔ نمایش (شیشه‌ای/کشویی) و پنهان‌کردن پیام بومی را تنظیم کنید.'));
     } else if (isSystem) {
       rows.push(h('div', { className: 'sys-warn', key: 'sw' },
         '⚠️ این یک نود سیستمی محافظت‌شده است. تغییر یا حذف آن می‌تواند رفتار ربات را خراب کند. فقط در صورت اطمینان ادامه دهید.'));
@@ -578,10 +578,9 @@
       h('input', {
         key: 'label', type: 'text', value: d.label || '',
         placeholder: 'مثلاً: خرید نقدی',
-        disabled: isMenu,
         onChange: function (e) { setField('label', e.target.value); }
       }),
-      isMenu ? 'برچسب این دکمه از منوی واقعی ربات می‌آید و قابل تغییر نیست.' : 'متنی که روی دکمه به کاربر نشان داده می‌شود.'));
+      isMenu ? 'نام این دکمهٔ منوی اصلی را تغییر دهید؛ پس از ذخیره، در کیبورد ربات اعمال می‌شود. (خالی بگذارید تا به نام پیش‌فرض برگردد.)' : 'متنی که روی دکمه به کاربر نشان داده می‌شود.'));
 
     // message text shown for most node types
     if (d.type !== 'condition') {
@@ -1374,7 +1373,10 @@
       // Two-step confirmation when EDITING a system (protected) node, mirroring
       // the delete protection. New nodes are never system, so this only fires on
       // edits of core buttons (e.g. the main menu root).
-      if (!panel.isNew && d.system) {
+      // EXCEPTION: renaming a main-menu (system_menu) button is now an intended,
+      // safe action (Audit-8) — its callback/behaviour is locked regardless — so
+      // we don't nag the admin with the scary confirmation for it.
+      if (!panel.isNew && d.system && d.node_kind !== 'system_menu') {
         if (!confirm('این نود «سیستمی» محافظت‌شده است. تغییر آن می‌تواند رفتار ربات را خراب کند. ادامه می‌دهید؟')) return;
         if (!confirm('تأیید نهایی: تغییرات روی نود سیستمی «' + d.label.trim() + '» اعمال شود؟')) return;
       }
