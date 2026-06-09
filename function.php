@@ -2250,6 +2250,67 @@ function product_media_detect($tmpPath, $originalName = '')
     return null;
 }
 
+/**
+ * Handle a multi-file upload ($_FILES['media'] shape) for a product, store the
+ * accepted files under /uploads/products and register them in product_media.
+ * Shared by product_media.php and the in-form uploader on product.php so the
+ * logic lives in one place.
+ *
+ * @param int   $pid    product id
+ * @param array $files  the $_FILES['media'] array (name/tmp_name/size/error as arrays)
+ * @return array{ok:int, err:int}  counts of stored / rejected files
+ */
+function product_media_handle_upload($pid, $files)
+{
+    $result = ['ok' => 0, 'err' => 0];
+    $pid = (int) $pid;
+    if ($pid <= 0 || empty($files) || !isset($files['name']) || !is_array($files['name'])) {
+        return $result;
+    }
+
+    // function.php lives at the project root, so uploads/ is a sibling of __DIR__.
+    $uploadDirAbs = __DIR__ . '/uploads/products';
+    $relPrefix    = 'uploads/products';
+    if (!is_dir($uploadDirAbs)) {
+        @mkdir($uploadDirAbs, 0755, true);
+    }
+
+    $maxBytes = 25 * 1024 * 1024; // 25 MB per file
+    $names = $files['name'];
+    for ($i = 0; $i < count($names); $i++) {
+        if (($files['error'][$i] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+            continue; // skip empty slots silently
+        }
+        $tmp  = $files['tmp_name'][$i];
+        $size = (int) ($files['size'][$i] ?? 0);
+        if ($size <= 0 || $size > $maxBytes) {
+            $result['err']++;
+            continue;
+        }
+        $detect = product_media_detect($tmp, $names[$i]);
+        if ($detect === null) {
+            $result['err']++;
+            continue; // disallowed type
+        }
+        [$mediaType, $ext] = $detect;
+        $fname = $pid . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
+        $dest  = $uploadDirAbs . '/' . $fname;
+        if (@move_uploaded_file($tmp, $dest)) {
+            @chmod($dest, 0644);
+            $mediaId = product_media_add($pid, $relPrefix . '/' . $fname, $mediaType);
+            // Cache a permanent Telegram file_id so the bot can deliver media
+            // reliably even without a public HTTPS URL. Best-effort.
+            if ($mediaId && function_exists('product_media_cache_telegram_id')) {
+                @product_media_cache_telegram_id($mediaId, $dest, $mediaType);
+            }
+            $result['ok']++;
+        } else {
+            $result['err']++;
+        }
+    }
+    return $result;
+}
+
 // ===========================================================================
 // Serial / license codes (product_type = 'serial_code')
 // A pool of codes per product; each is delivered once on purchase.

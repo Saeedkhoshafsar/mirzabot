@@ -107,11 +107,34 @@ window.repeaterDelRow = function (btn) {
 
 // Render the attribute inputs for a modal ('add' | 'edit').
 // `values` is an optional map of saved attribute values (used on edit).
+// Show/hide fields that are only meaningful for specific product type(s).
+// A field marked data-ptype-only="vpn,service" is visible only when the chosen
+// type is in that list; otherwise it's hidden AND its inputs are disabled so
+// they don't submit stale/irrelevant values.
+function applyTypeVisibility(which, ptype) {
+    var modal = document.getElementById(which + 'Modal');
+    var scope = modal || document;
+    var nodes = scope.querySelectorAll('[data-ptype-only]');
+    nodes.forEach(function (el) {
+        var allowed = (el.getAttribute('data-ptype-only') || '')
+            .split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+        var show = allowed.indexOf(ptype) !== -1;
+        el.style.display = show ? '' : 'none';
+        // toggle the disabled state of contained inputs so hidden fields don't post
+        el.querySelectorAll('input,select,textarea').forEach(function (inp) {
+            inp.disabled = !show;
+        });
+    });
+}
+
 window.renderAttrFields = function (which, values) {
     values = values || {};
     var typeSel = document.getElementById(which + '_ptype');
     var box = document.getElementById(which + '_attr');
     if (!typeSel || !box) return;
+
+    // First, toggle the static VPN-only fields for the selected type.
+    applyTypeVisibility(which, typeSel.value);
 
     var types = window.PRODUCT_TYPES || {};
     var def = types[typeSel.value];
@@ -201,7 +224,48 @@ window.openEditModal = function (p) {
     openModal('editModal');
 };
 
-// Initialise the add-modal attribute fields on load.
+// Wire a click/drag-drop file picker zone (used by the in-form image uploader).
+function wireDropZone(zoneId, inputId, pickedId) {
+    var input = document.getElementById(inputId);
+    var zone = document.getElementById(zoneId);
+    var picked = document.getElementById(pickedId);
+    if (!input || !zone) return;
+
+    function showFiles(files) {
+        if (!picked) return;
+        if (!files || !files.length) { picked.textContent = ''; return; }
+        var names = [];
+        for (var i = 0; i < files.length && i < 5; i++) names.push(files[i].name);
+        var label = files.length + ' فایل انتخاب شد: ' + names.join('، ');
+        if (files.length > 5) label += ' …';
+        picked.textContent = label;
+    }
+    input.addEventListener('change', function () { showFiles(input.files); });
+
+    ['dragenter', 'dragover'].forEach(function (ev) {
+        zone.addEventListener(ev, function (e) {
+            e.preventDefault(); e.stopPropagation();
+            zone.style.borderColor = 'var(--accent)';
+            zone.style.background = 'var(--accent-s, rgba(99,102,241,.08))';
+        });
+    });
+    ['dragleave', 'drop'].forEach(function (ev) {
+        zone.addEventListener(ev, function (e) {
+            e.preventDefault(); e.stopPropagation();
+            zone.style.borderColor = 'var(--bd)';
+            zone.style.background = 'var(--sf2)';
+        });
+    });
+    zone.addEventListener('drop', function (e) {
+        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+            input.files = e.dataTransfer.files;
+            showFiles(input.files);
+        }
+    });
+}
+
+// Initialise the add-modal attribute fields + in-form image uploader on load.
 document.addEventListener('DOMContentLoaded', function () {
     renderAttrFields('add');
+    wireDropZone('addDropZone', 'addMediaInput', 'addMediaPicked');
 });

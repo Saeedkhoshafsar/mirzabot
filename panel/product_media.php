@@ -17,9 +17,6 @@ if (!$product) {
     exit;
 }
 
-$uploadDirAbs = dirname(__DIR__) . '/uploads/products';
-$relPrefix    = 'uploads/products'; // relative to project root, stored in DB
-
 // --- Handle delete ---
 if (isset($_GET['delete'])) {
     csrf_check_get();
@@ -39,46 +36,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'uploa
         exit;
     }
 
-    if (!is_dir($uploadDirAbs)) {
-        @mkdir($uploadDirAbs, 0755, true);
-    }
-
-    $maxBytes = 25 * 1024 * 1024; // 25 MB per file
-    $okCount = 0;
-    $errCount = 0;
-    $names = $_FILES['media']['name'];
-
-    for ($i = 0; $i < count($names); $i++) {
-        if (($_FILES['media']['error'][$i] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
-            continue;
-        }
-        $tmp  = $_FILES['media']['tmp_name'][$i];
-        $size = (int) ($_FILES['media']['size'][$i] ?? 0);
-        if ($size <= 0 || $size > $maxBytes) {
-            $errCount++;
-            continue;
-        }
-        $detect = product_media_detect($tmp, $names[$i]);
-        if ($detect === null) {
-            $errCount++;
-            continue; // disallowed type
-        }
-        [$mediaType, $ext] = $detect;
-        $fname = $pid . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
-        $dest  = $uploadDirAbs . '/' . $fname;
-        if (@move_uploaded_file($tmp, $dest)) {
-            @chmod($dest, 0644);
-            $mediaId = product_media_add($pid, $relPrefix . '/' . $fname, $mediaType);
-            // Cache a permanent Telegram file_id so the bot can deliver media
-            // reliably even without a public HTTPS URL (Audit-2). Best-effort.
-            if ($mediaId && function_exists('product_media_cache_telegram_id')) {
-                @product_media_cache_telegram_id($mediaId, $dest, $mediaType);
-            }
-            $okCount++;
-        } else {
-            $errCount++;
-        }
-    }
+    // Shared upload logic (also used by the in-form uploader on product.php).
+    $counts   = product_media_handle_upload($pid, $_FILES['media']);
+    $okCount  = $counts['ok'];
+    $errCount = $counts['err'];
 
     if ($okCount > 0) {
         flash('success', $okCount . ' فایل با موفقیت آپلود شد.' . ($errCount ? ' (' . $errCount . ' فایل ناموفق)' : ''));

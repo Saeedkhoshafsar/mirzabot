@@ -30,20 +30,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add')
       $attrs = is_array($_POST['attr'] ?? null) ? $_POST['attr'] : [];
       set_product_type($newId, $ptype, $attrs);
     }
-    flash('success', $textbotlang['panel']['productAddedPrefix'] . $name . $textbotlang['panel']['productAddedSuffix']
-      . ' حالا می‌توانید تصویر/ویدیوی محصول را همین‌جا آپلود کنید.');
+
+    // Images uploaded directly in the add-product form (no separate step needed).
+    $mediaMsg = '';
+    if ($newId && !empty($_FILES['media']) && is_array($_FILES['media']['name'] ?? null)
+        && function_exists('product_media_handle_upload')) {
+      $counts = product_media_handle_upload($newId, $_FILES['media']);
+      if ($counts['ok'] > 0) {
+        $mediaMsg = ' (' . $counts['ok'] . ' رسانه آپلود شد'
+          . ($counts['err'] ? '، ' . $counts['err'] . ' ناموفق' : '') . ')';
+      } elseif ($counts['err'] > 0) {
+        $mediaMsg = ' (آپلود رسانه ناموفق بود؛ فقط تصویر/ویدیو/صوت تا ۲۵MB مجاز است)';
+      }
+    }
+
+    flash('success', $textbotlang['panel']['productAddedPrefix'] . $name
+      . $textbotlang['panel']['productAddedSuffix'] . $mediaMsg);
   } catch (Exception $e) {
     flash('error', $textbotlang['panel']['productDbError'] . $e->getMessage());
     header('Location: product.php');
     exit;
   }
-  // Take the admin straight to the media-upload page for the product they just
-  // created — so they never have to hunt for a tiny icon to add images.
-  if (!empty($newId)) {
-    header('Location: product_media.php?pid=' . (int) $newId . '&from=add');
-  } else {
-    header('Location: product.php');
-  }
+  header('Location: product.php');
   exit;
 }
 
@@ -194,32 +202,42 @@ include __DIR__ . '/inc/layout_head.php';
       <h3><?= $textbotlang['panel']['productAddModalTitle'] ?></h3>
       <button class="modal-x" onclick="closeModal('addModal')"><?= icon('close', 14) ?></button>
     </div>
-    <form method="POST">
+    <form method="POST" enctype="multipart/form-data">
       <div class="modal-body">
         <input type="hidden" name="_csrf" value="<?= csrf_token() ?>">
         <input type="hidden" name="action" value="add">
         <div class="form-grid">
+          <!-- STEP 1: product type FIRST — everything below adapts to this choice -->
+          <div class="field full">
+            <label>۱) نوع محصول را انتخاب کنید</label>
+            <?php $defaultPType = function_exists('panel_default_product_type') ? panel_default_product_type() : 'vpn'; ?>
+            <select name="product_type" id="add_ptype" class="select" onchange="renderAttrFields('add')">
+              <?php foreach (product_types() as $tk => $td): ?>
+                <option value="<?= htmlspecialchars($tk) ?>" <?= $tk === $defaultPType ? 'selected' : '' ?>><?= htmlspecialchars($td['label']) ?></option>
+              <?php endforeach; ?>
+            </select>
+            <div class="field-hint">با تغییر نوع محصول، فیلدها و مثال‌های پایین خودکار متناسب می‌شوند.</div>
+          </div>
+
           <div class="field full">
             <label><?= $textbotlang['panel']['productNameLabel'] ?></label>
-            <input type="text" name="name_product" class="input" placeholder="<?= htmlspecialchars($textbotlang['panel']['productNameExample']) ?>" required>
+            <input type="text" name="name_product" id="add_name" class="input" placeholder="<?= htmlspecialchars($textbotlang['panel']['productNameExample']) ?>" required>
           </div>
           <div class="field">
             <label><?= $textbotlang['panel']['productPriceLabel'] ?></label>
             <input type="number" name="price_product" class="input" placeholder="<?= htmlspecialchars($textbotlang['panel']['productZeroValue']) ?>" min="0">
           </div>
-          <div class="field">
+
+          <!-- VPN-only fields: hidden for physical/digital/etc. -->
+          <div class="field vpn-only" data-ptype-only="vpn">
             <label><?= $textbotlang['panel']['productVolumeLabel'] ?></label>
             <input type="number" name="volume_product" class="input" placeholder="<?= htmlspecialchars($textbotlang['panel']['productFiftyValue']) ?>" min="0">
           </div>
-          <div class="field">
+          <div class="field vpn-only" data-ptype-only="vpn">
             <label><?= $textbotlang['panel']['productDurationLabel'] ?></label>
             <input type="number" name="time_product" class="input" placeholder="<?= htmlspecialchars($textbotlang['panel']['productThirtyValue']) ?>" min="0">
           </div>
-          <div class="field">
-            <label><?= $textbotlang['panel']['productCategoryLabel'] ?></label>
-            <input type="text" name="cetegory_product" class="input" placeholder="<?= htmlspecialchars($textbotlang['panel']['productTypeExample']) ?>">
-          </div>
-          <div class="field">
+          <div class="field vpn-only" data-ptype-only="vpn">
             <label><?= $textbotlang['panel']['productPanelLabel'] ?></label>
             <select name="namepanel" class="select">
               <option value=""><?= $textbotlang['panel']['productNotSelected'] ?></option>
@@ -228,6 +246,11 @@ include __DIR__ . '/inc/layout_head.php';
                   <?= htmlspecialchars($pl['name_panel'] ?? $pl['id']) ?>
                 </option><?php endforeach; ?>
             </select>
+          </div>
+
+          <div class="field">
+            <label><?= $textbotlang['panel']['productCategoryLabel'] ?></label>
+            <input type="text" name="cetegory_product" class="input" placeholder="<?= htmlspecialchars($textbotlang['panel']['productTypeExample']) ?>">
           </div>
           <div class="field">
             <label><?= $textbotlang['panel']['productTypeLabel'] ?></label>
@@ -241,25 +264,25 @@ include __DIR__ . '/inc/layout_head.php';
             <label><?= $textbotlang['panel']['productNoteLabel'] ?></label>
             <input type="text" name="note_product" class="input" placeholder="<?= htmlspecialchars($textbotlang['panel']['productDescriptionOptional']) ?>">
           </div>
-          <div class="field full">
-            <label>نوع محصول</label>
-            <?php $defaultPType = function_exists('panel_default_product_type') ? panel_default_product_type() : 'vpn'; ?>
-            <select name="product_type" id="add_ptype" class="select" onchange="renderAttrFields('add')">
-              <?php foreach (product_types() as $tk => $td): ?>
-                <option value="<?= htmlspecialchars($tk) ?>" <?= $tk === $defaultPType ? 'selected' : '' ?>><?= htmlspecialchars($td['label']) ?></option>
-              <?php endforeach; ?>
-            </select>
-          </div>
+
+          <!-- type-specific attribute fields rendered by renderAttrFields() -->
           <div class="field full" id="add_attr" style="display:flex;flex-direction:column;gap:12px"></div>
+
+          <!-- STEP 2: product images RIGHT HERE — no need to edit again later -->
           <div class="field full">
-            <div class="notice" style="margin:0;display:flex;align-items:flex-start;gap:8px">
-              <?= icon('image', 16) ?>
-              <span style="font-size:.8rem;line-height:1.6">
-                <b>تصویر/ویدیوی محصول:</b> همین‌که روی «<?= $textbotlang['panel']['productSaveSubmitBtn'] ?>» بزنید،
-                مستقیم به صفحهٔ آپلود تصویر همین محصول می‌روید و می‌توانید عکس، ویدیو و صوت اضافه کنید
-                (تا ۵ رسانه در ربات به مشتری نشان داده می‌شود).
-              </span>
-            </div>
+            <label><?= icon('image', 14) ?> تصویر/ویدیو/صوت محصول (اختیاری)</label>
+            <label for="addMediaInput" id="addDropZone"
+              style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
+                     border:2px dashed var(--bd);border-radius:12px;padding:18px 14px;cursor:pointer;
+                     text-align:center;background:var(--sf2);transition:border-color .15s,background .15s">
+              <?= icon('image', 26) ?>
+              <div style="font-weight:700;color:var(--text);font-size:.85rem">برای انتخاب تصویر کلیک کنید</div>
+              <div style="font-size:.72rem;color:var(--mute)">یا فایل را همین‌جا رها کنید — چند فایل هم‌زمان مجاز است (عکس/ویدیو/صوت، تا ۲۵MB)</div>
+              <div id="addMediaPicked" style="font-size:.76rem;color:var(--accent);font-weight:700;min-height:1em"></div>
+              <input type="file" name="media[]" id="addMediaInput" multiple
+                accept="image/*,video/mp4,video/webm,audio/mpeg,audio/ogg,audio/wav" style="display:none">
+            </label>
+            <div class="field-hint">می‌توانید همین‌جا تصویر اضافه کنید؛ تا ۵ رسانه در ربات به مشتری نشان داده می‌شود.</div>
           </div>
         </div>
       </div>
