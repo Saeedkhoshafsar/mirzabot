@@ -3732,7 +3732,26 @@ function shop_checkout_cart($from_id, $user)
             $discount   = (int) $chk['amount'];
         }
     }
-    $payable = max(0, $total - $discount);
+    $afterDiscount = max(0, $total - $discount);
+
+    // Shipping cost (Audit-3,4,5): only for carts that contain a physical item.
+    // Weight is summed from each product's 'weight' attribute; the configured
+    // weight tariff / API quote / flat cost is then applied. Non-physical carts
+    // (VPN, files, codes) get 0 and the whole block is a no-op for them.
+    $shipping = 0;
+    $hasPhysical = false;
+    foreach ($data['lines'] as $l) {
+        if (($l['product']['product_type'] ?? '') === 'physical') {
+            $hasPhysical = true;
+            break;
+        }
+    }
+    if ($hasPhysical && function_exists('calc_shipping_cost')) {
+        $weight   = function_exists('cart_total_weight') ? cart_total_weight($data['lines']) : 0;
+        $shipping = (int) calc_shipping_cost($afterDiscount, null, null, $weight);
+    }
+
+    $payable = max(0, $afterDiscount + $shipping);
     $balance = (int) ($user['Balance'] ?? 0);
 
     if ($balance < $payable) {
@@ -3763,6 +3782,11 @@ function shop_checkout_cart($from_id, $user)
         $delivered[] = ($product['name_product'] ?? '') . " ×{$qty}";
     }
 
+    // Persist the shipping cost on the first order row of this cart (Audit-3).
+    if ($shipping > 0 && !empty($orderIds[0])) {
+        update("Payment_report", "shipping_cost", $shipping, "id_order", $orderIds[0]);
+    }
+
     // Record coupon usage once for the whole cart.
     if ($couponCode !== null && $discount > 0) {
         record_discount_use($couponCode, $from_id, $orderIds[0] ?? '', $discount);
@@ -3773,10 +3797,11 @@ function shop_checkout_cart($from_id, $user)
     }
     shop_cart_clear($from_id);
 
-    $disLine = $discount > 0 ? "\nتخفیف: " . number_format($discount) . " {$cur}" : '';
+    $disLine  = $discount > 0 ? "\nتخفیف: " . number_format($discount) . " {$cur}" : '';
+    $shipLine = $shipping > 0 ? "\nهزینهٔ ارسال: " . number_format($shipping) . " {$cur}" : '';
     sendmessage(
         $from_id,
-        "✅ پرداخت موفق بود.\nمبلغ پرداختی: <b>" . number_format($payable) . "</b> {$cur}{$disLine}\nسفارش شما ثبت شد.",
+        "✅ پرداخت موفق بود.\nمبلغ کالا: " . number_format($afterDiscount) . " {$cur}{$disLine}{$shipLine}\nمبلغ پرداختی: <b>" . number_format($payable) . "</b> {$cur}\nسفارش شما ثبت شد.",
         null,
         'html'
     );
@@ -4203,6 +4228,7 @@ function shipping_carriers()
                 'sender_name'  => ['label' => 'نام فرستنده', 'type' => 'text', 'required' => false, 'hint' => ''],
                 'sender_phone' => ['label' => 'تلفن فرستنده', 'type' => 'text', 'required' => false, 'hint' => ''],
                 'origin_city'  => ['label' => 'شهر مبدأ', 'type' => 'text', 'required' => false, 'hint' => ''],
+                'quote_url'    => ['label' => 'آدرس API نرخ‌دهی (اختیاری)', 'type' => 'text', 'required' => false, 'hint' => 'سرویس/Webhook نرخ‌دهی بر اساس وزن؛ خالی = نرخ پلکانی/دستی'],
             ],
         ],
         'tipax' => [
@@ -4213,6 +4239,7 @@ function shipping_carriers()
                 'username'     => ['label' => 'نام کاربری', 'type' => 'text', 'required' => false, 'hint' => ''],
                 'customer_id'  => ['label' => 'کد مشتری / Customer ID', 'type' => 'text', 'required' => false, 'hint' => ''],
                 'origin_city'  => ['label' => 'شهر مبدأ', 'type' => 'text', 'required' => false, 'hint' => ''],
+                'quote_url'    => ['label' => 'آدرس API نرخ‌دهی (اختیاری)', 'type' => 'text', 'required' => false, 'hint' => 'اگر یک Webhook/سرویس نرخ‌دهی دارید (مثلاً در n8n) که با وزن و مقصد قیمت برمی‌گرداند، آدرسش را بگذارید تا قیمت زنده گرفته شود؛ خالی = نرخ پلکانی/دستی'],
             ],
         ],
         'chapar' => [
@@ -4310,6 +4337,25 @@ function get_shipping_config($bot_id = null)
     $cfg['free_shipping']['enabled']   = !empty($cfg['free_shipping']['enabled']);
     $cfg['free_shipping']['min_order'] = (int) ($cfg['free_shipping']['min_order'] ?? 0);
     $cfg['default_cost']               = (int) ($cfg['default_cost'] ?? 0);
+
+    // Global weight-based tariff (base + per-kg). Optional (Audit-4).
+    $gt = is_array($cfg['weight_tariff'] ?? null) ? $cfg['weight_tariff'] : [];
+    $cfg['weight_tariff'] = [
+        'base'   => (int) ($gt['base'] ?? 0),
+        'per_kg' => (int) ($gt['per_kg'] ?? 0),
+    ];
+
+    // Normalise each carrier's per-carrier weight tariff too (if present).
+    foreach ($cfg['carriers'] as $code => &$c) {
+        if (isset($c['weight_tariff']) && is_array($c['weight_tariff'])) {
+            $c['weight_tariff'] = [
+                'base'   => (int) ($c['weight_tariff']['base'] ?? 0),
+                'per_kg' => (int) ($c['weight_tariff']['per_kg'] ?? 0),
+            ];
+        }
+    }
+    unset($c);
+
     return $cfg;
 }
 
@@ -4377,16 +4423,28 @@ function carrier_credential($carrier, $field, $bot_id = null)
 }
 
 /**
- * Compute the shipping cost for an order, honouring the free-shipping rule.
- * - If free shipping is enabled and (min_order == 0 OR order_total >= min_order)
- *   the cost is 0.
- * - Otherwise the per-carrier cost (if set) else the default_cost.
- * Returns an int cost in the store currency unit.
+ * Compute the shipping cost for an order (Audit-3,4,5).
+ *
+ * Resolution order (first match wins):
+ *   1. Free-shipping rule  -> 0
+ *   2. Live carrier API quote (if credentials present)  -> carrier_quote()
+ *   3. Weight-based tariff  (base_cost + per_kg * ceil(weight_kg))   ← real model
+ *   4. Per-carrier flat cost
+ *   5. Store default_cost
+ *
+ * @param int      $order_total   cart subtotal (for the free-shipping threshold)
+ * @param string   $carrier       carrier code, or null
+ * @param int|null $bot_id        scope
+ * @param int      $weight_grams  total parcel weight in grams (0 = unknown)
+ * @return int cost in the store currency unit
  */
-function calc_shipping_cost($order_total, $carrier = null, $bot_id = null)
+function calc_shipping_cost($order_total, $carrier = null, $bot_id = null, $weight_grams = 0)
 {
     $cfg = get_shipping_config($bot_id);
     $order_total = (int) $order_total;
+    $weight_grams = max(0, (int) $weight_grams);
+
+    // 1) Free shipping rule.
     $free = $cfg['free_shipping'];
     if (!empty($free['enabled'])) {
         $min = (int) ($free['min_order'] ?? 0);
@@ -4394,17 +4452,141 @@ function calc_shipping_cost($order_total, $carrier = null, $bot_id = null)
             return 0;
         }
     }
-    if ($carrier !== null && isset($cfg['carriers'][$carrier]['cost'])) {
-        return (int) $cfg['carriers'][$carrier]['cost'];
+
+    $cc = ($carrier !== null && isset($cfg['carriers'][$carrier]))
+        ? $cfg['carriers'][$carrier]
+        : [];
+
+    // 2) Live API quote when the merchant entered credentials for this carrier.
+    if ($carrier !== null && !empty($cc['creds']) && function_exists('carrier_quote')) {
+        $quote = carrier_quote($carrier, $weight_grams, $order_total, $cc['creds'], $bot_id);
+        if (is_int($quote) && $quote >= 0) {
+            return $quote;
+        }
     }
+
+    // 3) Weight-based tariff (base + per-kg). Used when configured for the carrier
+    //    or globally. This is how Iran Post / Tipax actually price parcels.
+    $tariff = is_array($cc['weight_tariff'] ?? null)
+        ? $cc['weight_tariff']
+        : (is_array($cfg['weight_tariff'] ?? null) ? $cfg['weight_tariff'] : null);
+    if ($tariff && $weight_grams > 0 && (!empty($tariff['base']) || !empty($tariff['per_kg']))) {
+        $base   = (int) ($tariff['base'] ?? 0);
+        $perKg  = (int) ($tariff['per_kg'] ?? 0);
+        $kg     = (int) ceil($weight_grams / 1000);
+        $kg     = max(1, $kg); // at least 1kg billed
+        return $base + ($perKg * $kg);
+    }
+
+    // 4) Per-carrier flat cost.
+    if ($carrier !== null && isset($cc['cost']) && (int) $cc['cost'] > 0) {
+        return (int) $cc['cost'];
+    }
+
+    // 5) Store default flat cost.
     return (int) ($cfg['default_cost'] ?? 0);
+}
+
+/**
+ * Live shipping-rate adapter (Audit-3). Given a carrier code + the merchant's
+ * private credentials, ask that carrier's API for a price based on weight and
+ * destination. Returns an int cost, or null to let the caller fall back to the
+ * weight tariff / flat cost.
+ *
+ * NOTE: Each carrier exposes a different REST contract and only issues working
+ * credentials to contracted merchants, so the concrete request shapes below are
+ * intentionally conservative: if the merchant supplies a custom "quote_url"
+ * credential we POST a generic JSON payload to it and read back {cost|price}.
+ * This lets a merchant (or an n8n flow) wire ANY carrier without us hard-coding
+ * each undocumented private API — while keeping a safe no-network fallback.
+ *
+ * @return int|null
+ */
+function carrier_quote($carrier, $weight_grams, $order_total, array $creds, $bot_id = null)
+{
+    // Only attempt a network call when the merchant gave us an explicit quote
+    // endpoint. Otherwise we don't know the carrier's private contract → null.
+    $quoteUrl = trim((string) ($creds['quote_url'] ?? ''));
+    if ($quoteUrl === '' || !preg_match('~^https?://~i', $quoteUrl)) {
+        return null;
+    }
+
+    $payload = [
+        'carrier'      => $carrier,
+        'weight_grams' => (int) $weight_grams,
+        'order_total'  => (int) $order_total,
+        'api_key'      => (string) ($creds['api_key'] ?? ''),
+        'origin_city'  => (string) ($creds['origin_city'] ?? ''),
+        'customer_id'  => (string) ($creds['customer_id'] ?? ''),
+    ];
+
+    $ch = curl_init($quoteUrl);
+    if ($ch === false) {
+        return null;
+    }
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST           => true,
+        CURLOPT_POSTFIELDS     => json_encode($payload, JSON_UNESCAPED_UNICODE),
+        CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
+        CURLOPT_TIMEOUT        => 6,
+        CURLOPT_CONNECTTIMEOUT => 4,
+    ]);
+    $resp = curl_exec($ch);
+    $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($resp === false || $code < 200 || $code >= 300) {
+        return null;
+    }
+    $data = json_decode((string) $resp, true);
+    if (!is_array($data)) {
+        return null;
+    }
+    // Accept either {cost: N} or {price: N} (toman/rial as the merchant defines).
+    $cost = $data['cost'] ?? ($data['price'] ?? null);
+    if ($cost === null || !is_numeric($cost)) {
+        return null;
+    }
+    return max(0, (int) $cost);
+}
+
+/**
+ * Total parcel weight (grams) for a set of cart lines. Reads the 'weight'
+ * attribute of each physical product × quantity. Non-physical lines weigh 0.
+ *
+ * @param array $lines  shop_cart_resolve()['lines']
+ * @return int grams
+ */
+function cart_total_weight(array $lines)
+{
+    $g = 0;
+    foreach ($lines as $l) {
+        $product = $l['product'] ?? [];
+        $qty     = max(1, (int) ($l['qty'] ?? 1));
+        $attrs   = [];
+        if (!empty($product['attributes'])) {
+            $attrs = is_array($product['attributes'])
+                ? $product['attributes']
+                : (json_decode((string) $product['attributes'], true) ?: []);
+        }
+        $w = (int) ($attrs['weight'] ?? 0);
+        if ($w > 0) {
+            $g += $w * $qty;
+        }
+    }
+    return $g;
 }
 
 /** True if free shipping currently applies to a given order total. */
 function is_free_shipping($order_total, $bot_id = null)
 {
-    return calc_shipping_cost($order_total, null, $bot_id) === 0
-        && !empty(get_shipping_config($bot_id)['free_shipping']['enabled']);
+    $cfg = get_shipping_config($bot_id);
+    if (empty($cfg['free_shipping']['enabled'])) {
+        return false;
+    }
+    $min = (int) ($cfg['free_shipping']['min_order'] ?? 0);
+    return $min <= 0 || (int) $order_total >= $min;
 }
 
 /**

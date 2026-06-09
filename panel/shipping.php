@@ -31,6 +31,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
             'min_order' => max(0, (int) ($_POST['free_min_order'] ?? 0)),
         ],
         'default_cost'  => max(0, (int) ($_POST['default_cost'] ?? 0)),
+        // Global weight tariff: base + per-kg (Audit-4).
+        'weight_tariff' => [
+            'base'   => max(0, (int) ($_POST['wt_base'] ?? 0)),
+            'per_kg' => max(0, (int) ($_POST['wt_per_kg'] ?? 0)),
+        ],
     ];
 
     $postedCarriers = $_POST['carrier'] ?? [];
@@ -38,6 +43,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
         $row     = is_array($postedCarriers[$code] ?? null) ? $postedCarriers[$code] : [];
         $enabled = !empty($row['enabled']);
         $cost    = max(0, (int) ($row['cost'] ?? 0));
+        $wtBase  = max(0, (int) ($row['wt_base'] ?? 0));
+        $wtPerKg = max(0, (int) ($row['wt_per_kg'] ?? 0));
         $creds   = [];
         foreach (($meta['fields'] ?? []) as $fkey => $fmeta) {
             $val = trim((string) ($row['creds'][$fkey] ?? ''));
@@ -46,12 +53,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
             }
         }
         // Only persist a carrier entry if it is enabled OR carries data.
-        if ($enabled || $cost > 0 || !empty($creds)) {
-            $newCfg['carriers'][$code] = [
+        if ($enabled || $cost > 0 || $wtBase > 0 || $wtPerKg > 0 || !empty($creds)) {
+            $entry = [
                 'enabled' => $enabled,
                 'cost'    => $cost,
                 'creds'   => $creds,
             ];
+            if ($wtBase > 0 || $wtPerKg > 0) {
+                $entry['weight_tariff'] = ['base' => $wtBase, 'per_kg' => $wtPerKg];
+            }
+            $newCfg['carriers'][$code] = $entry;
         }
     }
 
@@ -105,8 +116,17 @@ include __DIR__ . '/inc/layout_head.php';
 <?php endif; ?>
 
 <div class="notice">
-    اطلاعات API (مثل کلید تیپاکس یا قرارداد پست) برای هر کسب‌وکار <b>خصوصی</b> است و باید
-    دستی توسط شما وارد شود. این مقادیر فقط برای ثبت/رهگیری سفارش همان سرویس استفاده می‌شوند.
+    <b>ترتیب محاسبهٔ هزینهٔ ارسال</b> (اولین موردی که اعمال شود):
+    <ol style="margin:8px 0 0;padding-inline-start:20px;font-size:.82rem;line-height:1.9">
+        <li>اگر <b>ارسال رایگان</b> فعال باشد و شرطش برقرار شود → رایگان</li>
+        <li>اگر برای شرکت یک <b>آدرس API نرخ‌دهی</b> وارد شده باشد → قیمت <b>زنده</b> بر اساس وزن گرفته می‌شود</li>
+        <li>اگر <b>نرخ پلکانی وزنی</b> تنظیم شده باشد → <code>پایه + (هر کیلو × وزن سفارش)</code></li>
+        <li>در غیر این صورت → هزینهٔ ثابت شرکت، و اگر نبود هزینهٔ پیش‌فرض فروشگاه</li>
+    </ol>
+    <div style="margin-top:8px;font-size:.8rem;color:var(--mute)">
+        وزن از فیلد «وزن (گرم)» محصول خوانده می‌شود. اطلاعات API هر کسب‌وکار <b>خصوصی</b> است و دستی وارد می‌شود.
+        <br>توجه: فیلد «روش‌های ارسال» داخل فرم محصول فقط جنبهٔ <b>نمایشی/اطلاع‌رسانی</b> دارد؛ هزینهٔ واقعی از همین صفحه (سطح فروشگاه) محاسبه می‌شود.
+    </div>
 </div>
 
 <form method="POST" action="shipping.php">
@@ -141,6 +161,29 @@ include __DIR__ . '/inc/layout_head.php';
         </div>
     </div>
 
+    <!-- Global weight tariff -------------------------------------------- -->
+    <?php $gwt = is_array($cfg['weight_tariff'] ?? null) ? $cfg['weight_tariff'] : ['base' => 0, 'per_kg' => 0]; ?>
+    <div class="card fade-up d1" style="margin-bottom:16px">
+        <div class="card-head">
+            <div>
+                <div class="card-title">نرخ‌گذاری بر اساس وزن (پلکانی)</div>
+                <div class="card-subtitle">قیمت = هزینهٔ پایه + (هزینهٔ هر کیلوگرم × وزن سفارش به کیلوگرم، رو به بالا). اگر هر دو صفر باشد، غیرفعال است.</div>
+            </div>
+        </div>
+        <div class="card-body" style="display:flex;gap:14px;flex-wrap:wrap">
+            <div class="field" style="max-width:240px">
+                <label>هزینهٔ پایه (<?= htmlspecialchars(function_exists('store_currency') ? store_currency() : 'تومان') ?>)</label>
+                <input type="number" min="0" name="wt_base" class="input" value="<?= (int) ($gwt['base'] ?? 0) ?>" placeholder="0">
+                <div class="field-hint">هزینهٔ ثابت اولیهٔ هر مرسوله.</div>
+            </div>
+            <div class="field" style="max-width:240px">
+                <label>هزینهٔ هر کیلوگرم (<?= htmlspecialchars(function_exists('store_currency') ? store_currency() : 'تومان') ?>)</label>
+                <input type="number" min="0" name="wt_per_kg" class="input" value="<?= (int) ($gwt['per_kg'] ?? 0) ?>" placeholder="0">
+                <div class="field-hint">به‌ازای هر کیلوگرم وزن. مثال: پایه ۳۰٬۰۰۰ + هر کیلو ۱۵٬۰۰۰ → بستهٔ ۲٫۳ کیلویی = ۳۰٬۰۰۰ + ۳×۱۵٬۰۰۰.</div>
+            </div>
+        </div>
+    </div>
+
     <!-- Carriers -------------------------------------------------------- -->
     <div class="card fade-up d2" style="margin-bottom:16px">
         <div class="card-head">
@@ -165,12 +208,26 @@ include __DIR__ . '/inc/layout_head.php';
                     <code style="margin-inline-start:auto;font-size:.72rem;color:var(--dim)"><?= htmlspecialchars($code) ?></code>
                 </label>
 
+                <?php $cwt = is_array($cc['weight_tariff'] ?? null) ? $cc['weight_tariff'] : ['base' => 0, 'per_kg' => 0]; ?>
                 <div id="creds-<?= htmlspecialchars($code) ?>" class="carrier-fields" style="<?= $enabled ? '' : 'display:none;' ?>margin-top:12px;padding-top:12px;border-top:1px dashed var(--bd)">
-                    <div class="field" style="max-width:280px;margin-bottom:10px">
-                        <label>هزینهٔ ارسال این شرکت (<?= htmlspecialchars(function_exists('store_currency') ? store_currency() : 'تومان') ?>)</label>
-                        <input type="number" min="0" name="carrier[<?= htmlspecialchars($code) ?>][cost]" class="input"
-                               value="<?= $cost ?>" placeholder="0">
-                        <div class="field-hint">خالی/۰ یعنی از هزینهٔ پیش‌فرض استفاده شود.</div>
+                    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+                        <div class="field" style="max-width:220px">
+                            <label>هزینهٔ ثابت این شرکت</label>
+                            <input type="number" min="0" name="carrier[<?= htmlspecialchars($code) ?>][cost]" class="input"
+                                   value="<?= $cost ?>" placeholder="0">
+                            <div class="field-hint">خالی/۰ = از پیش‌فرض استفاده شود.</div>
+                        </div>
+                        <div class="field" style="max-width:160px">
+                            <label>نرخ وزنی: پایه</label>
+                            <input type="number" min="0" name="carrier[<?= htmlspecialchars($code) ?>][wt_base]" class="input"
+                                   value="<?= (int) ($cwt['base'] ?? 0) ?>" placeholder="0">
+                        </div>
+                        <div class="field" style="max-width:160px">
+                            <label>نرخ وزنی: هر کیلو</label>
+                            <input type="number" min="0" name="carrier[<?= htmlspecialchars($code) ?>][wt_per_kg]" class="input"
+                                   value="<?= (int) ($cwt['per_kg'] ?? 0) ?>" placeholder="0">
+                            <div class="field-hint">اگر تنظیم شود، بر نرخ وزنی سراسری اولویت دارد.</div>
+                        </div>
                     </div>
 
                     <?php if ($hasFields): ?>
