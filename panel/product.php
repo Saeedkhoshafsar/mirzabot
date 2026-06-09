@@ -151,7 +151,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'edit'
       if (!empty($_FILES['media_variant']) && function_exists('product_apply_variant_images')) {
         product_apply_variant_images($pid, $_FILES['media_variant']);
       }
-      flash('success', $textbotlang['panel']['productEdited']);
+      // Main product images uploaded right inside the edit form (same as the add
+      // form). This is what makes editing the product photo possible again.
+      $editMediaMsg = '';
+      if (!empty($_FILES['media']) && is_array($_FILES['media']['name'] ?? null)
+          && function_exists('product_media_handle_upload')) {
+        $counts = product_media_handle_upload($pid, $_FILES['media']);
+        if ($counts['ok'] > 0) {
+          $editMediaMsg = ' (' . $counts['ok'] . ' رسانه آپلود شد'
+            . ($counts['err'] ? '، ' . $counts['err'] . ' ناموفق' : '') . ')';
+        } elseif ($counts['err'] > 0) {
+          $editMediaMsg = ' (آپلود رسانه ناموفق بود؛ فقط تصویر/ویدیو/صوت تا ۲۵MB مجاز است)';
+        }
+      }
+      flash('success', $textbotlang['panel']['productEdited'] . $editMediaMsg);
     } catch (Exception $e) {
       flash('error', $textbotlang['panel']['productErrorPrefix'] . $e->getMessage());
     }
@@ -168,6 +181,18 @@ if (isset($_GET['delete'])) {
   exit;
 }
 
+// Delete a single main-product media file (from the edit modal gallery).
+if (isset($_GET['delmedia'])) {
+  csrf_check_get();
+  if (function_exists('product_media_delete')) {
+    product_media_delete((int) $_GET['delmedia']);
+  }
+  flash('success', 'تصویر حذف شد.');
+  $back = isset($_GET['pid']) ? '?edit=' . (int) $_GET['pid'] : '';
+  header('Location: product.php' . $back);
+  exit;
+}
+
 $panels = [];
 try {
   $panels = db_fetchAll($pdo, "SELECT * FROM marzban_panel");
@@ -175,6 +200,20 @@ try {
 }
 $allCats = function_exists('categories_names') ? categories_names() : [];
 $products = db_fetchAll($pdo, "SELECT * FROM product ORDER BY id");
+// Attach the main product media (for the edit modal gallery). Stored relative
+// to project root; the panel serves them as ../uploads/... .
+if (function_exists('product_media_list')) {
+  foreach ($products as &$pRow) {
+    $pRow['_media'] = array_map(function ($m) {
+      return [
+        'id'        => (int) $m['id'],
+        'type'      => $m['media_type'] ?? 'image',
+        'file_path' => ltrim((string) $m['file_path'], '/'),
+      ];
+    }, product_media_list((int) $pRow['id']));
+  }
+  unset($pRow);
+}
 
 $pageTitle = $textbotlang['panel']['productsTitle'];
 $pageLede = $textbotlang['panel']['productsSubtitle'];
@@ -487,7 +526,25 @@ include __DIR__ . '/inc/layout_head.php';
           </div>
 
           <div class="field full" id="edit_attr" style="display:flex;flex-direction:column;gap:12px"></div>
-          <?php /* دکمهٔ «مدیریت/افزودن تصویر، ویدیو و صوت» حذف شد: اکنون رسانه از بخش «ویژگی‌ها/تنوع» (حتی برای تک‌محصول بدون پس‌کد) قابل افزودن است. */ ?>
+
+          <!-- Main product images: view current, delete, and add new (right here). -->
+          <div class="field full">
+            <label><?= icon('image', 14) ?> تصویر/ویدیو/صوت اصلی محصول</label>
+            <div id="edit_media_gallery"
+              style="display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px;margin-bottom:8px"></div>
+            <label for="editMediaInput" id="editDropZone"
+              style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
+                     border:2px dashed var(--bd);border-radius:12px;padding:16px 14px;cursor:pointer;
+                     text-align:center;background:var(--sf2);transition:border-color .15s,background .15s">
+              <?= icon('image', 24) ?>
+              <div style="font-weight:700;color:var(--text);font-size:.82rem">برای افزودن تصویر کلیک کنید</div>
+              <div style="font-size:.7rem;color:var(--mute)">یا فایل را همین‌جا رها کنید (عکس/ویدیو/صوت، تا ۲۵MB)</div>
+              <div id="editMediaPicked" style="font-size:.74rem;color:var(--accent);font-weight:700;min-height:1em"></div>
+              <input type="file" name="media[]" id="editMediaInput" multiple
+                accept="image/*,video/mp4,video/webm,audio/mpeg,audio/ogg,audio/wav" style="display:none">
+            </label>
+            <div class="field-hint">این تصویر اصلی روی کارت محصول در ربات نمایش داده می‌شود. تصاویر «ویژگی‌ها/پس‌کد» جدا هستند و با دکمهٔ «نمایش همهٔ پس‌کدها» ارسال می‌شوند.</div>
+          </div>
         </div>
       </div>
       <div class="modal-foot">
@@ -659,6 +716,21 @@ include __DIR__ . '/inc/layout_head.php';
     if (frame) frame.src = 'product_preview.php?pid=' + encodeURIComponent(pid) + '&embed=1';
     if (typeof openModal === 'function') openModal('previewModal');
   };
+
+  // Re-open the edit modal after a media delete redirect (?edit=ID), so the
+  // seller stays in the edit context and sees the updated gallery.
+  (function () {
+    var params = new URLSearchParams(window.location.search);
+    var eid = params.get('edit');
+    if (!eid) return;
+    var all = <?= json_encode($products, JSON_UNESCAPED_UNICODE | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+    var prod = (all || []).filter(function (x) { return String(x.id) === String(eid); })[0];
+    document.addEventListener('DOMContentLoaded', function () {
+      if (prod && typeof window.openEditModal === 'function') {
+        window.openEditModal(prod);
+      }
+    });
+  }());
 </script>
 
 <?php include __DIR__ . '/inc/layout_foot.php'; ?>
