@@ -9,8 +9,16 @@
 // anything to Telegram and deletes any temporary dump file it creates.
 //
 // Safety:
+//   * It is protected by a secret key (the bot's $APIKEY). Without the correct
+//     ?key=... it returns 403 and reveals nothing — so the URL alone is useless
+//     to anyone who doesn't already know the bot token.
 //   * It never prints the database password.
 //   * It only reads/creates a temporary dump file and removes it afterwards.
+//
+// How to open it:
+//   https://YOUR-DOMAIN/cronbot/backuptest.php?key=YOUR_BOT_TOKEN
+//   (YOUR_BOT_TOKEN is the $APIKEY value from config.php — the same token
+//    BotFather gave you for this bot.)
 // ---------------------------------------------------------------------------
 
 date_default_timezone_set('Asia/Tehran');
@@ -18,6 +26,24 @@ require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../function.php';
 
 header('Content-Type: text/html; charset=utf-8');
+
+// --- access guard -----------------------------------------------------------
+// Require the bot token as ?key=... so the page can't be reached just by
+// guessing the URL. We compare with hash_equals to avoid timing attacks.
+$expectedKey = isset($APIKEY) ? (string) $APIKEY : '';
+$providedKey = isset($_GET['key']) ? (string) $_GET['key'] : '';
+if ($expectedKey === '' || $providedKey === '' || !hash_equals($expectedKey, $providedKey)) {
+    http_response_code(403);
+    echo '<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8">';
+    echo '<meta name="viewport" content="width=device-width, initial-scale=1">';
+    echo '<title>دسترسی مجاز نیست</title></head>';
+    echo '<body style="font-family:Tahoma,Arial,sans-serif;background:#0f1115;color:#e6e6e6;padding:18px;line-height:1.9">';
+    echo '<h2>⛔ دسترسی مجاز نیست</h2>';
+    echo '<div>برای باز کردن این صفحه باید کلید (توکن ربات) را در آدرس وارد کنید:</div>';
+    echo '<div style="margin-top:8px;color:#9aa">مثال: <code>cronbot/backuptest.php?key=توکنِ‌ربات</code></div>';
+    echo '</body></html>';
+    exit;
+}
 
 function line($emoji, $text)
 {
