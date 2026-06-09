@@ -911,6 +911,9 @@ window.renderAttrFields = function (which, values) {
         if (val === undefined || val === null) val = '';
         var html = '<div class="field"';
         if (f.show_when) html += ' data-show-when="' + escapeHtml(f.show_when) + '"';
+        // hide_when: inverse of show_when — hide & disable this field while the
+        // gating checkbox is ON (e.g. hide موجودی کل/SKU once تنوع is enabled).
+        if (f.hide_when) html += ' data-hide-when="' + escapeHtml(f.hide_when) + '"';
         html += '><label>' + escapeHtml(f.label) + '</label>';
 
         if (f.type === 'textarea') {
@@ -1023,6 +1026,19 @@ window.applyShowWhen = function (scope) {
         el.style.display = on ? '' : 'none';
         el.querySelectorAll('input,select,textarea').forEach(function (inp) {
             inp.disabled = !on;
+        });
+    });
+    // hide_when: the inverse — the field is visible by DEFAULT and gets hidden &
+    // disabled while the gating checkbox is ON. Used so that turning on
+    // "پس‌کد/تنوع" hides the single موجودی کل / SKU inputs (their values then
+    // come from the per-variant rows instead, avoiding two competing stocks).
+    scope.querySelectorAll('[data-hide-when]').forEach(function (el) {
+        var key = el.getAttribute('data-hide-when');
+        var gate = scope.querySelector('input[type=checkbox][data-bool-key="' + key + '"]');
+        var on = gate ? gate.checked : false;
+        el.style.display = on ? 'none' : '';
+        el.querySelectorAll('input,select,textarea').forEach(function (inp) {
+            inp.disabled = on;
         });
     });
 };
