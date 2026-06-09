@@ -148,9 +148,15 @@ include __DIR__ . '/inc/layout_head.php';
                     onclick="openEditModal(<?= htmlspecialchars(json_encode($p), ENT_QUOTES) ?>)">
                     <?= icon('edit', 13) ?>
                   </button>
-                  <a href="product_media.php?pid=<?= (int) $p['id'] ?>" class="btn btn-ghost btn-sm btn-icon"
-                    title="رسانهٔ محصول">
-                    <?= icon('eye', 13) ?>
+                  <?php $mediaCount = function_exists('product_media_count') ? product_media_count((int) $p['id']) : 0; ?>
+                  <a href="product_media.php?pid=<?= (int) $p['id'] ?>"
+                    class="btn <?= $mediaCount > 0 ? 'btn-ghost' : 'btn-no' ?> btn-sm btn-icon"
+                    title="🖼 تصاویر و رسانهٔ محصول<?= $mediaCount > 0 ? ' (' . $mediaCount . ' فایل)' : ' — هنوز تصویری ندارد' ?>"
+                    style="position:relative">
+                    <?= icon('image', 13) ?>
+                    <?php if ($mediaCount > 0): ?>
+                      <span style="position:absolute;top:-6px;inset-inline-end:-6px;background:var(--accent);color:#fff;font-size:.6rem;min-width:15px;height:15px;line-height:15px;border-radius:8px;padding:0 3px;text-align:center"><?= $mediaCount ?></span>
+                    <?php endif; ?>
                   </a>
                   <?php if (($p['product_type'] ?? 'vpn') === 'serial_code'):
                       $cc = product_codes_count((int) $p['id']); ?>
@@ -238,6 +244,16 @@ include __DIR__ . '/inc/layout_head.php';
             </select>
           </div>
           <div class="field full" id="add_attr" style="display:flex;flex-direction:column;gap:12px"></div>
+          <div class="field full">
+            <div class="notice" style="margin:0;display:flex;align-items:flex-start;gap:8px">
+              <?= icon('image', 16) ?>
+              <span style="font-size:.8rem;line-height:1.6">
+                <b>تصویر/ویدیوی محصول:</b> پس از ثبت محصول، روی دکمهٔ
+                <span style="display:inline-flex;vertical-align:middle"><?= icon('image', 13) ?></span>
+                در ردیف همان محصول بزنید تا تصویر، ویدیو و صوت آپلود کنید (تا ۵ رسانه در ربات نمایش داده می‌شود).
+              </span>
+            </div>
+          </div>
         </div>
       </div>
       <div class="modal-foot">
@@ -311,6 +327,11 @@ include __DIR__ . '/inc/layout_head.php';
             </select>
           </div>
           <div class="field full" id="edit_attr" style="display:flex;flex-direction:column;gap:12px"></div>
+          <div class="field full">
+            <a href="#" id="edit_media_link" class="btn btn-ghost" style="width:100%;justify-content:center">
+              <?= icon('image', 14) ?> مدیریت تصاویر، ویدیو و صوت این محصول
+            </a>
+          </div>
         </div>
       </div>
       <div class="modal-foot">

@@ -68,7 +68,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'uploa
         $dest  = $uploadDirAbs . '/' . $fname;
         if (@move_uploaded_file($tmp, $dest)) {
             @chmod($dest, 0644);
-            product_media_add($pid, $relPrefix . '/' . $fname, $mediaType);
+            $mediaId = product_media_add($pid, $relPrefix . '/' . $fname, $mediaType);
+            // Cache a permanent Telegram file_id so the bot can deliver media
+            // reliably even without a public HTTPS URL (Audit-2). Best-effort.
+            if ($mediaId && function_exists('product_media_cache_telegram_id')) {
+                @product_media_cache_telegram_id($mediaId, $dest, $mediaType);
+            }
             $okCount++;
         } else {
             $errCount++;

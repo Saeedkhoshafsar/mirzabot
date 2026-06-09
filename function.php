@@ -2059,6 +2059,25 @@ function product_media_list($product_id)
 }
 
 /**
+ * Count media rows for a product (used by the panel to show a badge on the
+ * "images" button so the admin can see at a glance that a product has media).
+ */
+function product_media_count($product_id)
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return 0;
+    }
+    try {
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM product_media WHERE product_id = ?");
+        $stmt->execute([(int) $product_id]);
+        return (int) $stmt->fetchColumn();
+    } catch (Exception $e) {
+        return 0;
+    }
+}
+
+/**
  * Add a media record for a product.
  * $media_type: image|video|audio|document
  */
@@ -2071,11 +2090,103 @@ function product_media_add($product_id, $file_path, $media_type = 'image', $tele
     try {
         $sort = (int) ($pdo->query("SELECT COALESCE(MAX(sort),0)+1 FROM product_media WHERE product_id = " . (int) $product_id)->fetchColumn());
         $stmt = $pdo->prepare("INSERT INTO product_media (product_id, media_type, file_path, telegram_file_id, sort, created_at) VALUES (?, ?, ?, ?, ?, NOW())");
-        return $stmt->execute([(int) $product_id, $media_type, $file_path, $telegram_file_id, $sort]);
+        $ok = $stmt->execute([(int) $product_id, $media_type, $file_path, $telegram_file_id, $sort]);
+        // Return the new row id (truthy) so callers can cache a telegram file_id.
+        return $ok ? (int) $pdo->lastInsertId() : false;
     } catch (Exception $e) {
         error_log("product_media_add error: " . $e->getMessage());
         return false;
     }
+}
+
+/**
+ * Cache a permanent Telegram file_id for a freshly-uploaded media row.
+ *
+ * Why: when a product is shown in the bot, media is sent by URL
+ * ($domainhosts/uploads/...). That URL must be PUBLIC + HTTPS or Telegram
+ * silently fails to fetch it (Audit-2). To make delivery robust and fast we
+ * upload the local file ONCE here (CURLFile) to the main admin's chat and store
+ * the returned file_id; afterwards the bot reuses that id (no public URL needed).
+ *
+ * Best-effort: if there is no admin chat or the upload fails, we keep the URL
+ * fallback and simply return false — nothing breaks.
+ *
+ * @param int    $mediaId   product_media.id
+ * @param string $absPath   absolute path of the stored file on disk
+ * @param string $mediaType image|video|audio
+ * @return string|false the cached file_id, or false if not cached
+ */
+function product_media_cache_telegram_id($mediaId, $absPath, $mediaType)
+{
+    global $pdo, $adminnumber;
+    if (!isset($pdo) || !is_file($absPath) || !function_exists('telegram')) {
+        return false;
+    }
+
+    // Resolve a chat to upload to: first registered admin, else $adminnumber.
+    $chatId = null;
+    try {
+        $admins = select('admin', 'id_admin', null, null, 'FETCH_COLUMN');
+        if (is_array($admins) && !empty($admins)) {
+            $chatId = (string) $admins[0];
+        }
+    } catch (Exception $e) {
+        // ignore
+    }
+    if ($chatId === null && isset($adminnumber) && $adminnumber !== '') {
+        $chatId = (string) $adminnumber;
+    }
+    if ($chatId === null || (int) $chatId === 0) {
+        return false;
+    }
+
+    // Pick the right Telegram method + the field that carries the file_id back.
+    $map = [
+        'image' => ['sendPhoto',    'photo',    'photo'],     // photo => array of sizes
+        'video' => ['sendVideo',    'video',    'video'],
+        'audio' => ['sendAudio',    'audio',    'audio'],
+    ];
+    if (!isset($map[$mediaType])) {
+        return false;
+    }
+    [$method, $field, $resultKey] = $map[$mediaType];
+
+    $res = telegram($method, [
+        'chat_id'              => $chatId,
+        $field                 => new CURLFile($absPath),
+        'caption'              => '🗂 کش رسانهٔ محصول (می‌توانید این پیام را حذف کنید)',
+        'disable_notification' => true,
+    ]);
+
+    if (!is_array($res) || empty($res['ok']) || empty($res['result'])) {
+        return false;
+    }
+    $result = $res['result'];
+
+    // Extract file_id depending on type.
+    $fileId = null;
+    if ($resultKey === 'photo') {
+        // photo is an array of PhotoSize; take the largest (last) entry.
+        if (!empty($result['photo']) && is_array($result['photo'])) {
+            $last = end($result['photo']);
+            $fileId = $last['file_id'] ?? null;
+        }
+    } elseif (isset($result[$resultKey]['file_id'])) {
+        $fileId = $result[$resultKey]['file_id'];
+    }
+
+    if (!$fileId) {
+        return false;
+    }
+
+    try {
+        $pdo->prepare("UPDATE product_media SET telegram_file_id = ? WHERE id = ?")
+            ->execute([$fileId, (int) $mediaId]);
+    } catch (Exception $e) {
+        error_log("product_media_cache_telegram_id error: " . $e->getMessage());
+        return false;
+    }
+    return $fileId;
 }
 
 /**

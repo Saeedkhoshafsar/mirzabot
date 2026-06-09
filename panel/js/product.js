@@ -192,6 +192,12 @@ window.openEditModal = function (p) {
     }
     renderAttrFields('edit', attrs || {});
 
+    // Point the "manage media" button at this product's media page (Audit-1).
+    var mediaLink = document.getElementById('edit_media_link');
+    if (mediaLink && p.id) {
+        mediaLink.setAttribute('href', 'product_media.php?pid=' + encodeURIComponent(p.id));
+    }
+
     openModal('editModal');
 };
 
