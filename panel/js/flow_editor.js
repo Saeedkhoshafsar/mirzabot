@@ -468,7 +468,7 @@
     }
     if (type === 'n8n') {
       return {
-        n8n_mode: 'async', n8n_endpoint: '', n8n_tag: '', n8n_timeout_sec: 5,
+        n8n_mode: 'async', n8n_endpoint: '', n8n_endpoint_ref: '', n8n_tag: '', n8n_timeout_sec: 5,
         send_path: true, send_inputs: true, wait_message: 'در حال بررسی…'
       };
     }
@@ -541,7 +541,7 @@
 
     if (isMenu) {
       rows.push(h('div', { className: 'sys-warn', key: 'sw' },
-        'ℹ️ این دکمهٔ «منوی واقعی» ربات است. برچسب و رفتار اصلی آن به کد ربات وصل است و قابل تغییر نیست؛ اما می‌توانید نحوهٔ نمایش دکمه‌های فرزندی که خودتان اضافه کرده‌اید (شیشه‌ای/کشویی) و پنهان‌کردن پیام بومی را از پایین تنظیم کنید.'));
+        'ℹ️ این دکمهٔ «منوی واقعی» ربات است. می‌توانید نام (متن) دکمه را همین‌جا تغییر دهید — همین تغییر در کیبورد ربات اعمال می‌شود. رفتار اصلی دکمه به کد ربات وصل است و قابل تغییر نیست، اما می‌توانید دکمه‌های فرزند اضافه کنید و نحوهٔ نمایش (شیشه‌ای/کشویی) و پنهان‌کردن پیام بومی را تنظیم کنید.'));
     } else if (isSystem) {
       rows.push(h('div', { className: 'sys-warn', key: 'sw' },
         '⚠️ این یک نود سیستمی محافظت‌شده است. تغییر یا حذف آن می‌تواند رفتار ربات را خراب کند. فقط در صورت اطمینان ادامه دهید.'));
@@ -578,10 +578,9 @@
       h('input', {
         key: 'label', type: 'text', value: d.label || '',
         placeholder: 'مثلاً: خرید نقدی',
-        disabled: isMenu,
         onChange: function (e) { setField('label', e.target.value); }
       }),
-      isMenu ? 'برچسب این دکمه از منوی واقعی ربات می‌آید و قابل تغییر نیست.' : 'متنی که روی دکمه به کاربر نشان داده می‌شود.'));
+      isMenu ? 'نام این دکمهٔ منوی اصلی را تغییر دهید؛ پس از ذخیره، در کیبورد ربات اعمال می‌شود. (خالی بگذارید تا به نام پیش‌فرض برگردد.)' : 'متنی که روی دکمه به کاربر نشان داده می‌شود.'));
 
     // message text shown for most node types
     if (d.type !== 'condition') {
@@ -900,8 +899,31 @@
           'اگر مطمئن نیستید، یکی از این‌ها را بزنید؛ فقط کافی است بعد آدرس Webhook را وارد کنید.',
           applyPreset)
       ));
+      // --- Transparency: explain how this differs from the global automation page ---
+      rows.push(h('div', { className: 'sys-warn', key: 'gn8nexplain', style: { background: '#0c2a3a', borderColor: '#0e7490', color: '#a5f3fc' } },
+        h('div', { style: { fontWeight: 800, marginBottom: '4px' } }, '🔌 این نود چه فرقی با صفحهٔ «اتوماسیون و n8n» دارد؟'),
+        h('div', null, 'این نود فقط وقتی کاربر روی همین دکمه کلیک کند، اطلاعات را به n8n می‌فرستد (در لحظهٔ تعامل).'),
+        h('div', { style: { marginTop: '4px' } }, 'صفحهٔ «اتوماسیون و n8n» برای رویدادهای کلی ربات است (مثل ثبت سفارش جدید) که خودکار و بدون کلیک کاربر ارسال می‌شوند. اگر آدرس Webhook خود را آنجا یک‌بار تعریف کرده‌اید، می‌توانید پایین همان را «اتصال ذخیره‌شده» انتخاب کنید تا دوبار وارد نکنید.')
+      ));
+      // --- Reuse a saved (global) endpoint instead of pasting the URL again ---
+      var savedEps = (window.FLOW_N8N_ENDPOINTS || []).filter(function (e) { return e && e.url; });
+      var usingRef = (cfg.n8n_endpoint_ref || '') !== '';
       rows.push(h('div', { className: 'grp', key: 'gn8n' },
         h('div', { className: 'grp-t' }, 'اتصال به n8n'),
+        savedEps.length ? field('استفاده از اتصال ذخیره‌شده (اختیاری)',
+          h('select', {
+            value: cfg.n8n_endpoint_ref || '',
+            onChange: function (e) { setCfg('n8n_endpoint_ref', e.target.value); }
+          },
+            [h('option', { value: '', key: 'none' }, '— آدرس را دستی وارد می‌کنم —')].concat(
+              savedEps.map(function (ep, i) {
+                var lbl = (ep.name && ep.name.length ? ep.name : ep.url);
+                return h('option', { value: ep.name || ep.url, key: 'ep' + i }, lbl);
+              })
+            )
+          ),
+          'اتصال‌های ذخیره‌شده در صفحهٔ «اتوماسیون و n8n» تعریف می‌شوند. با انتخاب یکی، آدرس و کلید امضا خودکار از همان‌جا گرفته می‌شود (تعریف در یک جا = به‌روزرسانی در همه‌جا).') : null,
+        usingRef ? h('div', { className: 'fld hlp', key: 'refnote', style: { color: '#5eead4' } }, '✓ این نود از اتصال ذخیره‌شده استفاده می‌کند؛ نیازی به وارد کردن آدرس نیست.') :
         field('آدرس Webhook (از n8n کپی کنید)',
           h('input', { type: 'text', value: cfg.n8n_endpoint || '', placeholder: 'https://n8n.example.com/webhook/...', onChange: function (e) { setCfg('n8n_endpoint', e.target.value); } }),
           'این آدرس را از داخل سناریوی n8n خود (گرهِ Webhook) بردارید. بدون آن، این نود کاری نمی‌کند.'),
@@ -1351,7 +1373,10 @@
       // Two-step confirmation when EDITING a system (protected) node, mirroring
       // the delete protection. New nodes are never system, so this only fires on
       // edits of core buttons (e.g. the main menu root).
-      if (!panel.isNew && d.system) {
+      // EXCEPTION: renaming a main-menu (system_menu) button is now an intended,
+      // safe action (Audit-8) — its callback/behaviour is locked regardless — so
+      // we don't nag the admin with the scary confirmation for it.
+      if (!panel.isNew && d.system && d.node_kind !== 'system_menu') {
         if (!confirm('این نود «سیستمی» محافظت‌شده است. تغییر آن می‌تواند رفتار ربات را خراب کند. ادامه می‌دهید؟')) return;
         if (!confirm('تأیید نهایی: تغییرات روی نود سیستمی «' + d.label.trim() + '» اعمال شود؟')) return;
       }

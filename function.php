@@ -1996,54 +1996,76 @@ function product_types()
     return [
         'vpn' => [
             'label'  => 'سرویس VPN (پیش‌فرض)',
+            'examples' => [
+                'name'     => 'مثلاً: ۵۰ گیگ یک ماهه',
+                'category' => 'مثلاً: اشتراک، نمایندگی',
+                'note'     => 'توضیح کوتاه دربارهٔ سرویس (اختیاری)',
+            ],
             'fields' => [], // handled by dedicated legacy columns
         ],
         'physical' => [
             'label'  => 'کالای فیزیکی',
+            'examples' => [
+                'name'     => 'مثلاً: هدفون بلوتوثی مدل X',
+                'category' => 'مثلاً: لوازم جانبی، پوشاک',
+                'note'     => 'توضیح کالا، مشخصات فنی… (اختیاری)',
+            ],
             'fields' => [
                 ['key' => 'brand',         'label' => 'برند', 'type' => 'text', 'hint' => 'اختیاری'],
-                ['key' => 'sku',           'label' => 'کد انبار (SKU)', 'type' => 'text', 'hint' => 'اختیاری'],
                 ['key' => 'warranty',      'label' => 'گارانتی', 'type' => 'text', 'hint' => 'مثلاً: ۱۸ ماه'],
-                ['key' => 'stock',         'label' => 'موجودی کل (اگر واریانت ندارد)', 'type' => 'number', 'hint' => 'اگر از واریانت‌ها استفاده می‌کنید، خالی بگذارید'],
                 ['key' => 'weight',        'label' => 'وزن (گرم)', 'type' => 'number', 'hint' => 'برای محاسبهٔ هزینهٔ ارسال'],
                 ['key' => 'needs_address', 'label' => 'نیاز به آدرس پستی', 'type' => 'bool', 'hint' => 'دریافت آدرس هنگام خرید'],
+                // Single-stock fields (used when the product has NO variants/پس‌کد).
+                ['key' => 'sku',           'label' => 'کد انبار (SKU)', 'type' => 'text', 'hint' => 'اختیاری — فقط وقتی پس‌کد/تنوع ندارید'],
+                ['key' => 'stock',         'label' => 'موجودی کل', 'type' => 'number', 'hint' => 'فقط وقتی پس‌کد/تنوع ندارید'],
 
-                // Variant schema picker (custom, category-like template). Lets
-                // the merchant choose which custom columns the variants table
-                // shows for THIS product: clothing → رنگ/سایز/جنس/پس‌کد,
-                // cosmetics → حجم/شِید, home appliance → ولتاژ/گارانتی, … When
-                // left on "پیش‌فرض" the legacy رنگ/سایز/SKU columns are used.
+                // Gate: enabling "پس‌کد/تنوع" reveals the variants table. When this
+                // is checked the product is treated as multi-variant (e.g. several
+                // colors), each variant carries its own code, stock, price & image,
+                // and the single SKU/stock above are ignored.
+                ['key' => 'has_variants', 'label' => 'این محصول پس‌کد/تنوع دارد (چند رنگ/سایز)', 'type' => 'bool',
+                 'hint' => 'با تیک‌زدن، جدول تنوع فعال می‌شود و می‌توانید برای هر رنگ پس‌کد، موجودی، قیمت و تصویر جدا ثبت کنید.'],
+
+                // Variant schema picker (custom, category-like template). Shown
+                // only when has_variants is checked. Lets the merchant choose
+                // which custom columns the variants table shows for THIS product:
+                // clothing → رنگ/سایز/جنس/پس‌کد, cosmetics → حجم/شِید, … When left
+                // on "پیش‌فرض" the built-in پس‌کد/رنگ/سایز columns below are used.
                 ['key' => '_variant_schema', 'label' => 'قالب تنوع (ستون‌های دلخواه)', 'type' => 'variant_schema',
+                 'show_when' => 'has_variants',
                  'hint' => 'برای هر دستهٔ کالا (لباس، آرایشی، لوازم خانگی…) می‌توانید در «مدیریت قالب‌های تنوع» ستون‌های دلخواه بسازید و اینجا انتخاب کنید. ستون‌های موجودی/اختلاف قیمت/تصویر همیشه به‌صورت خودکار اضافه می‌شوند.'],
 
-                // Variants: columns are rendered dynamically from the chosen
-                // schema (see _variant_schema). The list below is only the
-                // default fallback when no schema is selected.
-                ['key' => 'variants', 'label' => 'تنوع محصول (رنگ/سایز)', 'type' => 'repeater',
+                // Variants: shown only when has_variants is checked (data-show-when).
+                // Columns are rendered dynamically from the chosen schema
+                // (see _variant_schema); the 'columns' list below is the default
+                // fallback used when no schema is selected.
+                ['key' => 'variants', 'label' => 'تنوع محصول (رنگ/سایز/پس‌کد)', 'type' => 'repeater',
+                 'show_when' => 'has_variants',
                  'dynamic_columns' => true, // columns come from the selected schema (JS)
-                 'hint' => 'برای هر تنوع یک ردیف بسازید؛ موجودی و قیمت هرکدام مستقل است. در ستون‌های لیستی می‌توانید از مقادیر آماده انتخاب کنید یا «مقدار دلخواه…» را بزنید و دستی وارد کنید.',
+                 'hint' => 'برای هر رنگ/سایز یک ردیف بسازید. پس‌کد مثل ۲۳۴۵-۱، ۲۳۴۵-۲. برای هر ردیف می‌توانید یک تصویر مجزا آپلود کنید. در ستون‌های لیستی می‌توانید از مقادیر آماده انتخاب کنید یا «مقدار دلخواه…» را بزنید.',
                  'columns' => [
+                    ['key' => 'variant_code', 'label' => 'پس‌کد', 'type' => 'text'],
                     ['key' => 'color',      'label' => 'رنگ',           'type' => 'text'],
                     ['key' => 'size',       'label' => 'سایز',          'type' => 'text'],
-                    ['key' => 'sku',        'label' => 'کد (SKU)',       'type' => 'text'],
                     ['key' => 'stock',      'label' => 'موجودی',         'type' => 'number'],
                     ['key' => 'price_diff', 'label' => 'اختلاف قیمت (+/−)', 'type' => 'number'],
-                    ['key' => 'image',      'label' => 'تصویر این تنوع',   'type' => 'image'],
+                    ['key' => 'image',      'label' => 'تصویر این رنگ',   'type' => 'image'],
                  ],
                 ],
-                // Shipping methods: post / tipax / courier / pickup, each with cost & ETA.
-                ['key' => 'shipping_methods', 'label' => 'روش‌های ارسال', 'type' => 'repeater',
-                 'hint' => 'مثلاً پست پیشتاز، تیپاکس، پیک، تحویل حضوری — هزینه و زمان هرکدام جداگانه.',
-                 'columns' => [
-                    ['key' => 'name',  'label' => 'نام روش (پست/تیپاکس/پیک)', 'type' => 'text'],
-                    ['key' => 'price', 'label' => 'هزینهٔ ارسال', 'type' => 'number'],
-                    ['key' => 'days',  'label' => 'زمان تقریبی (روز)', 'type' => 'text'],
-                 ],
-                ],
+
+                // Carriers: pick from the merchant's enabled (API-backed) carriers
+                // instead of typing a company name. Customer chooses one at checkout.
+                ['key' => 'carriers', 'label' => 'شرکت‌های پستی مجاز برای این محصول', 'type' => 'carriers',
+                 'hint' => 'از شرکت‌های پستی فعال (تنظیم‌شده در بخش ارسال) یک یا چند مورد را انتخاب کنید؛ مشتری هنگام خرید یکی را برمی‌گزیند.'],
             ],
         ],
         'digital_file' => [
             'label'  => 'فایل دیجیتال',
+            'examples' => [
+                'name'     => 'مثلاً: کتاب صوتی، قالب آماده',
+                'category' => 'مثلاً: کتاب، قالب، نرم‌افزار',
+                'note'     => 'توضیح فایل و کاربرد آن (اختیاری)',
+            ],
             'fields' => [
                 ['key' => 'file_id',   'label' => 'شناسهٔ فایل تلگرام (file_id)', 'type' => 'text',     'hint' => 'فایل پس از خرید ارسال می‌شود'],
                 ['key' => 'file_type', 'label' => 'نوع فایل', 'type' => 'select', 'hint' => '',
@@ -2058,12 +2080,22 @@ function product_types()
         ],
         'serial_code' => [
             'label'  => 'کد/سریال (لایسنس)',
+            'examples' => [
+                'name'     => 'مثلاً: لایسنس آنتی‌ویروس ۱ ساله',
+                'category' => 'مثلاً: لایسنس، گیفت‌کارت',
+                'note'     => 'توضیح نحوهٔ فعال‌سازی کد (اختیاری)',
+            ],
             'fields' => [
                 ['key' => 'code_format', 'label' => 'قالب نمایش کد', 'type' => 'text', 'hint' => 'مثلاً: کد شما: {code}'],
             ],
         ],
         'service' => [
             'label'  => 'خدمت/سرویس عمومی',
+            'examples' => [
+                'name'     => 'مثلاً: طراحی لوگو، مشاوره',
+                'category' => 'مثلاً: خدمات، مشاوره',
+                'note'     => 'توضیح خدمت و نحوهٔ ارائه (اختیاری)',
+            ],
             'fields' => [
                 ['key' => 'delivery_note', 'label' => 'توضیح تحویل', 'type' => 'textarea', 'hint' => 'متنی که پس از خرید نمایش داده می‌شود'],
             ],
@@ -2128,7 +2160,7 @@ function product_attr($productOrJson, $key, $default = null)
  * Persist the product_type + attributes JSON for a product row.
  * Validates the type and keeps only fields declared for that type.
  */
-function set_product_type($product_id, $type, array $attributes = [])
+function set_product_type($product_id, $type, array $attributes = [], array $keepRows = [])
 {
     global $pdo;
     if (!isset($pdo)) {
@@ -2188,8 +2220,11 @@ function set_product_type($product_id, $type, array $attributes = [])
             foreach ($cols as $c) {
                 $colKeys[$c['key']] = true;
             }
+            // Rows that have a pending image upload for this field/index must be
+            // kept even if their text cells are empty (image-only variants).
+            $keepIdx = isset($keepRows[$k]) && is_array($keepRows[$k]) ? $keepRows[$k] : [];
             $rows = [];
-            foreach ($v as $row) {
+            foreach ($v as $idx => $row) {
                 if (!is_array($row)) {
                     continue;
                 }
@@ -2205,12 +2240,14 @@ function set_product_type($product_id, $type, array $attributes = [])
                         $hasValue = true;
                     }
                 }
-                if ($hasValue) {
-                    $rows[] = $cleanRow;
+                if ($hasValue || in_array((string) $idx, $keepIdx, true)) {
+                    // Preserve the original submitted index so per-row uploaded
+                    // images (media_variant[k][idx]) line up with this row.
+                    $rows[$idx] = $cleanRow;
                 }
             }
             if (!empty($rows)) {
-                $clean[$k] = array_values($rows);
+                $clean[$k] = $rows; // keep original keys (do NOT re-index)
             }
             continue;
         }
@@ -2218,6 +2255,22 @@ function set_product_type($product_id, $type, array $attributes = [])
         if ($ftype === 'bool') {
             // Normalize checkbox-style values to 1/0.
             $clean[$k] = ($v === '1' || $v === 1 || $v === true || $v === 'on') ? 1 : 0;
+            continue;
+        }
+
+        if ($ftype === 'carriers') {
+            // Multi-select of carrier codes; keep only known, non-empty codes.
+            $valid = function_exists('shipping_carriers') ? shipping_carriers() : [];
+            $codes = [];
+            foreach ((array) $v as $code) {
+                $code = is_string($code) ? trim($code) : '';
+                if ($code !== '' && (empty($valid) || isset($valid[$code])) && !in_array($code, $codes, true)) {
+                    $codes[] = $code;
+                }
+            }
+            if (!empty($codes)) {
+                $clean[$k] = array_values($codes);
+            }
             continue;
         }
 
@@ -2249,6 +2302,184 @@ function set_product_type($product_id, $type, array $attributes = [])
     }
 }
 
+// ===========================================================================
+// Product categories (managed centrally, reused on the product form).
+// Backed by the existing `category` table: id + remark (the category name).
+// A product can belong to several categories; we store them as a comma-joined
+// string in product.category (backward-compatible with the old free-text field
+// and the existing search which does `category LIKE ?`).
+// ===========================================================================
+
+/** List all categories (name strings), sorted, de-duplicated. */
+function categories_list()
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return [];
+    }
+    try {
+        $rows = $pdo->query("SELECT id, remark FROM category ORDER BY remark ASC")->fetchAll(PDO::FETCH_ASSOC);
+        return $rows ?: [];
+    } catch (Exception $e) {
+        error_log("categories_list error: " . $e->getMessage());
+        return [];
+    }
+}
+
+/** Just the category names as a flat array. */
+function categories_names()
+{
+    $names = [];
+    foreach (categories_list() as $c) {
+        $n = trim((string) ($c['remark'] ?? ''));
+        if ($n !== '') {
+            $names[] = $n;
+        }
+    }
+    return $names;
+}
+
+/** Add a category by name (no duplicates, case-insensitive). Returns true on add. */
+function categories_add($name)
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return false;
+    }
+    $name = trim((string) $name);
+    if ($name === '' || mb_strlen($name) > 200) {
+        return false;
+    }
+    try {
+        // reject case-insensitive duplicate
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM category WHERE LOWER(remark) = LOWER(?)");
+        $stmt->execute([$name]);
+        if ((int) $stmt->fetchColumn() > 0) {
+            return false;
+        }
+        $stmt = $pdo->prepare("INSERT INTO category (remark) VALUES (?)");
+        return $stmt->execute([$name]);
+    } catch (Exception $e) {
+        error_log("categories_add error: " . $e->getMessage());
+        return false;
+    }
+}
+
+/** Rename a category by id; also updates references inside product.category CSV. */
+function categories_rename($id, $newName)
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return false;
+    }
+    $newName = trim((string) $newName);
+    if ($newName === '' || mb_strlen($newName) > 200) {
+        return false;
+    }
+    try {
+        $stmt = $pdo->prepare("SELECT remark FROM category WHERE id = ?");
+        $stmt->execute([(int) $id]);
+        $old = $stmt->fetchColumn();
+        if ($old === false) {
+            return false;
+        }
+        $stmt = $pdo->prepare("UPDATE category SET remark = ? WHERE id = ?");
+        $stmt->execute([$newName, (int) $id]);
+        // propagate rename into products that referenced the old name
+        product_category_replace_name((string) $old, $newName);
+        return true;
+    } catch (Exception $e) {
+        error_log("categories_rename error: " . $e->getMessage());
+        return false;
+    }
+}
+
+/** Delete a category by id; also strips it from product.category CSVs. */
+function categories_delete($id)
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return false;
+    }
+    try {
+        $stmt = $pdo->prepare("SELECT remark FROM category WHERE id = ?");
+        $stmt->execute([(int) $id]);
+        $name = $stmt->fetchColumn();
+        $stmt = $pdo->prepare("DELETE FROM category WHERE id = ?");
+        $stmt->execute([(int) $id]);
+        if ($name !== false) {
+            product_category_replace_name((string) $name, null); // remove from products
+        }
+        return true;
+    } catch (Exception $e) {
+        error_log("categories_delete error: " . $e->getMessage());
+        return false;
+    }
+}
+
+/** Parse a product.category CSV string into a clean array of names. */
+function product_category_parse($csv)
+{
+    $parts = preg_split('/\s*,\s*/', (string) $csv, -1, PREG_SPLIT_NO_EMPTY);
+    return array_values(array_unique(array_map('trim', $parts)));
+}
+
+/** Join an array of category names into the stored CSV form. */
+function product_category_join(array $names)
+{
+    $clean = [];
+    foreach ($names as $n) {
+        $n = trim((string) $n);
+        if ($n !== '' && !in_array($n, $clean, true)) {
+            $clean[] = $n;
+        }
+    }
+    return implode(', ', $clean);
+}
+
+/**
+ * Replace (or remove, when $new===null) a category name inside every product's
+ * category CSV. Keeps product assignments consistent after rename/delete.
+ */
+function product_category_replace_name($old, $new)
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return;
+    }
+    $old = trim((string) $old);
+    if ($old === '') {
+        return;
+    }
+    try {
+        $stmt = $pdo->prepare("SELECT id, category FROM product WHERE category LIKE ?");
+        $stmt->execute(['%' . $old . '%']);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $upd = $pdo->prepare("UPDATE product SET category = ? WHERE id = ?");
+        foreach ($rows as $r) {
+            $names = product_category_parse($r['category'] ?? '');
+            $changed = false;
+            $out = [];
+            foreach ($names as $n) {
+                if (strcasecmp($n, $old) === 0) {
+                    $changed = true;
+                    if ($new !== null && trim((string) $new) !== '') {
+                        $out[] = trim((string) $new);
+                    }
+                    // when $new is null -> drop it
+                } else {
+                    $out[] = $n;
+                }
+            }
+            if ($changed) {
+                $upd->execute([product_category_join($out), (int) $r['id']]);
+            }
+        }
+    } catch (Exception $e) {
+        error_log("product_category_replace_name error: " . $e->getMessage());
+    }
+}
+
 /**
  * List media rows for a product, ordered by sort then id.
  */
@@ -2268,6 +2499,25 @@ function product_media_list($product_id)
 }
 
 /**
+ * Count media rows for a product (used by the panel to show a badge on the
+ * "images" button so the admin can see at a glance that a product has media).
+ */
+function product_media_count($product_id)
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return 0;
+    }
+    try {
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM product_media WHERE product_id = ?");
+        $stmt->execute([(int) $product_id]);
+        return (int) $stmt->fetchColumn();
+    } catch (Exception $e) {
+        return 0;
+    }
+}
+
+/**
  * Add a media record for a product.
  * $media_type: image|video|audio|document
  */
@@ -2280,11 +2530,103 @@ function product_media_add($product_id, $file_path, $media_type = 'image', $tele
     try {
         $sort = (int) ($pdo->query("SELECT COALESCE(MAX(sort),0)+1 FROM product_media WHERE product_id = " . (int) $product_id)->fetchColumn());
         $stmt = $pdo->prepare("INSERT INTO product_media (product_id, media_type, file_path, telegram_file_id, sort, created_at) VALUES (?, ?, ?, ?, ?, NOW())");
-        return $stmt->execute([(int) $product_id, $media_type, $file_path, $telegram_file_id, $sort]);
+        $ok = $stmt->execute([(int) $product_id, $media_type, $file_path, $telegram_file_id, $sort]);
+        // Return the new row id (truthy) so callers can cache a telegram file_id.
+        return $ok ? (int) $pdo->lastInsertId() : false;
     } catch (Exception $e) {
         error_log("product_media_add error: " . $e->getMessage());
         return false;
     }
+}
+
+/**
+ * Cache a permanent Telegram file_id for a freshly-uploaded media row.
+ *
+ * Why: when a product is shown in the bot, media is sent by URL
+ * ($domainhosts/uploads/...). That URL must be PUBLIC + HTTPS or Telegram
+ * silently fails to fetch it (Audit-2). To make delivery robust and fast we
+ * upload the local file ONCE here (CURLFile) to the main admin's chat and store
+ * the returned file_id; afterwards the bot reuses that id (no public URL needed).
+ *
+ * Best-effort: if there is no admin chat or the upload fails, we keep the URL
+ * fallback and simply return false — nothing breaks.
+ *
+ * @param int    $mediaId   product_media.id
+ * @param string $absPath   absolute path of the stored file on disk
+ * @param string $mediaType image|video|audio
+ * @return string|false the cached file_id, or false if not cached
+ */
+function product_media_cache_telegram_id($mediaId, $absPath, $mediaType)
+{
+    global $pdo, $adminnumber;
+    if (!isset($pdo) || !is_file($absPath) || !function_exists('telegram')) {
+        return false;
+    }
+
+    // Resolve a chat to upload to: first registered admin, else $adminnumber.
+    $chatId = null;
+    try {
+        $admins = select('admin', 'id_admin', null, null, 'FETCH_COLUMN');
+        if (is_array($admins) && !empty($admins)) {
+            $chatId = (string) $admins[0];
+        }
+    } catch (Exception $e) {
+        // ignore
+    }
+    if ($chatId === null && isset($adminnumber) && $adminnumber !== '') {
+        $chatId = (string) $adminnumber;
+    }
+    if ($chatId === null || (int) $chatId === 0) {
+        return false;
+    }
+
+    // Pick the right Telegram method + the field that carries the file_id back.
+    $map = [
+        'image' => ['sendPhoto',    'photo',    'photo'],     // photo => array of sizes
+        'video' => ['sendVideo',    'video',    'video'],
+        'audio' => ['sendAudio',    'audio',    'audio'],
+    ];
+    if (!isset($map[$mediaType])) {
+        return false;
+    }
+    [$method, $field, $resultKey] = $map[$mediaType];
+
+    $res = telegram($method, [
+        'chat_id'              => $chatId,
+        $field                 => new CURLFile($absPath),
+        'caption'              => '🗂 کش رسانهٔ محصول (می‌توانید این پیام را حذف کنید)',
+        'disable_notification' => true,
+    ]);
+
+    if (!is_array($res) || empty($res['ok']) || empty($res['result'])) {
+        return false;
+    }
+    $result = $res['result'];
+
+    // Extract file_id depending on type.
+    $fileId = null;
+    if ($resultKey === 'photo') {
+        // photo is an array of PhotoSize; take the largest (last) entry.
+        if (!empty($result['photo']) && is_array($result['photo'])) {
+            $last = end($result['photo']);
+            $fileId = $last['file_id'] ?? null;
+        }
+    } elseif (isset($result[$resultKey]['file_id'])) {
+        $fileId = $result[$resultKey]['file_id'];
+    }
+
+    if (!$fileId) {
+        return false;
+    }
+
+    try {
+        $pdo->prepare("UPDATE product_media SET telegram_file_id = ? WHERE id = ?")
+            ->execute([$fileId, (int) $mediaId]);
+    } catch (Exception $e) {
+        error_log("product_media_cache_telegram_id error: " . $e->getMessage());
+        return false;
+    }
+    return $fileId;
 }
 
 /**
@@ -2348,137 +2690,170 @@ function product_media_detect($tmpPath, $originalName = '')
     return null;
 }
 
-// ===========================================================================
-// Per-variant image uploads.
-//
-// A multi-variant product (e.g. a shirt in red/blue/yellow) needs a SEPARATE
-// photo per variant so the buyer sees the exact colour they pick. The product
-// form posts these as media_variant[<fieldKey>][<rowIdx>] file inputs. After
-// the variants JSON is saved we attach each uploaded image's URL to its row's
-// `image` cell (matched by the same rowIdx).
-// ===========================================================================
+/**
+ * Handle a multi-file upload ($_FILES['media'] shape) for a product, store the
+ * accepted files under /uploads/products and register them in product_media.
+ * Shared by product_media.php and the in-form uploader on product.php so the
+ * logic lives in one place.
+ *
+ * @param int   $pid    product id
+ * @param array $files  the $_FILES['media'] array (name/tmp_name/size/error as arrays)
+ * @return array{ok:int, err:int}  counts of stored / rejected files
+ */
+function product_media_handle_upload($pid, $files)
+{
+    $result = ['ok' => 0, 'err' => 0];
+    $pid = (int) $pid;
+    if ($pid <= 0 || empty($files) || !isset($files['name']) || !is_array($files['name'])) {
+        return $result;
+    }
+
+    // function.php lives at the project root, so uploads/ is a sibling of __DIR__.
+    $uploadDirAbs = __DIR__ . '/uploads/products';
+    $relPrefix    = 'uploads/products';
+    if (!is_dir($uploadDirAbs)) {
+        @mkdir($uploadDirAbs, 0755, true);
+    }
+
+    $maxBytes = 25 * 1024 * 1024; // 25 MB per file
+    $names = $files['name'];
+    for ($i = 0; $i < count($names); $i++) {
+        if (($files['error'][$i] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+            continue; // skip empty slots silently
+        }
+        $tmp  = $files['tmp_name'][$i];
+        $size = (int) ($files['size'][$i] ?? 0);
+        if ($size <= 0 || $size > $maxBytes) {
+            $result['err']++;
+            continue;
+        }
+        $detect = product_media_detect($tmp, $names[$i]);
+        if ($detect === null) {
+            $result['err']++;
+            continue; // disallowed type
+        }
+        [$mediaType, $ext] = $detect;
+        $fname = $pid . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
+        $dest  = $uploadDirAbs . '/' . $fname;
+        if (@move_uploaded_file($tmp, $dest)) {
+            @chmod($dest, 0644);
+            $mediaId = product_media_add($pid, $relPrefix . '/' . $fname, $mediaType);
+            // Cache a permanent Telegram file_id so the bot can deliver media
+            // reliably even without a public HTTPS URL. Best-effort.
+            if ($mediaId && function_exists('product_media_cache_telegram_id')) {
+                @product_media_cache_telegram_id($mediaId, $dest, $mediaType);
+            }
+            $result['ok']++;
+        } else {
+            $result['err']++;
+        }
+    }
+    return $result;
+}
 
 /**
  * Save a single uploaded variant image (one $_FILES slot) and return its
- * relative URL (e.g. "uploads/products/variants/12_ab.jpg"), or null on
- * failure. Only images are accepted.
+ * relative URL (e.g. "uploads/products/variants/12_ab.jpg"), or null on failure.
+ * Only images are accepted. Used for per-color/per-پس‌کد variant pictures.
  */
 function product_variant_image_save($pid, $tmp, $origName, $size, $error)
 {
-    if ($error !== UPLOAD_ERR_OK || !is_uploaded_file($tmp)) {
-        // Allow non-uploaded paths only in CLI tests; in web context require upload.
-        if (!(PHP_SAPI === 'cli' && is_file($tmp))) {
-            return null;
-        }
+    $pid = (int) $pid;
+    if ($pid <= 0 || ($error ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        return null;
     }
+    $size = (int) $size;
     if ($size <= 0 || $size > 25 * 1024 * 1024) {
-        return null; // empty or > 25MB
+        return null;
     }
-    $detected = product_media_detect($tmp, $origName);
-    if (!$detected || $detected[0] !== 'image') {
-        return null; // variants only accept images
+    $detect = product_media_detect($tmp, $origName);
+    if ($detect === null) {
+        return null;
     }
-    $ext = $detected[1];
-
+    [$mediaType, $ext] = $detect;
+    if ($mediaType !== 'image') {
+        return null; // variants only accept images (product_media_detect returns 'image')
+    }
     $dirAbs = __DIR__ . '/uploads/products/variants';
     $relPrefix = 'uploads/products/variants';
     if (!is_dir($dirAbs)) {
         @mkdir($dirAbs, 0755, true);
     }
-    $fname = ((int) $pid) . '_' . bin2hex(random_bytes(6)) . '.' . $ext;
-    $absPath = $dirAbs . '/' . $fname;
-
-    $moved = @move_uploaded_file($tmp, $absPath);
-    if (!$moved) {
-        // CLI/test fallback (move_uploaded_file refuses non-HTTP uploads).
-        $moved = @copy($tmp, $absPath);
+    $fname = $pid . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
+    $dest = $dirAbs . '/' . $fname;
+    if (@move_uploaded_file($tmp, $dest)) {
+        @chmod($dest, 0644);
+        return $relPrefix . '/' . $fname;
     }
-    if (!$moved) {
-        return null;
-    }
-    return $relPrefix . '/' . $fname;
+    return null;
 }
 
 /**
  * After set_product_type(), merge any uploaded per-variant images into the
  * product's stored attributes. $variantFiles is the normalised
  * $_FILES['media_variant'] array (shape: [fieldKey][idx] => file fields).
- * Returns true if the attributes were updated.
+ * Returns the number of images saved.
  */
 function product_apply_variant_images($pid, $variantFiles)
 {
     global $pdo;
     $pid = (int) $pid;
     if ($pid <= 0 || !is_array($variantFiles) || !isset($pdo)) {
-        return false;
+        return 0;
     }
-
     // Load current attributes.
     try {
-        $stmt = $pdo->prepare("SELECT attributes FROM product WHERE id = ? LIMIT 1");
+        $stmt = $pdo->prepare("SELECT attributes FROM product WHERE id = ?");
         $stmt->execute([$pid]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        $raw = $stmt->fetchColumn();
     } catch (Exception $e) {
-        error_log("product_apply_variant_images load error: " . $e->getMessage());
-        return false;
+        return 0;
     }
-    if (!$row) {
-        return false;
+    $attrs = $raw ? json_decode((string) $raw, true) : [];
+    if (!is_array($attrs)) {
+        $attrs = [];
     }
-    $attrs = product_attributes($row['attributes'] ?? null);
-    $changed = false;
-
+    $saved = 0;
     foreach ($variantFiles as $fieldKey => $rows) {
-        // PHP nests multi-file inputs as parallel arrays keyed by sub-fields:
-        //   media_variant[fieldKey] => name[idx], tmp_name[idx], size[idx], error[idx]
-        if (!is_array($rows) || !isset($rows['tmp_name']) || !is_array($rows['tmp_name'])) {
+        if (!is_array($rows) || !isset($attrs[$fieldKey]) || !is_array($attrs[$fieldKey])) {
             continue;
         }
-        if (!isset($attrs[$fieldKey]) || !is_array($attrs[$fieldKey])) {
-            continue; // no saved rows for this repeater
-        }
+        // $_FILES nested layout: media_variant[fieldKey][idx] →
+        //   $variantFiles[fieldKey] has parallel arrays name/tmp_name/size/error keyed by idx.
         $names = $rows['name'] ?? [];
-        $tmps  = $rows['tmp_name'];
+        $tmps  = $rows['tmp_name'] ?? [];
         $sizes = $rows['size'] ?? [];
         $errs  = $rows['error'] ?? [];
-
-        foreach ($tmps as $idx => $tmp) {
-            if ($tmp === '' || $tmp === null) {
+        if (!is_array($names)) {
+            continue;
+        }
+        foreach ($names as $idx => $nm) {
+            if (($errs[$idx] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
                 continue;
             }
-            $nm = $names[$idx] ?? '';
-            $url = product_variant_image_save($pid, $tmp, $nm, $sizes[$idx] ?? 0, $errs[$idx] ?? 0);
-            if ($url === null) {
-                continue;
-            }
-            // Attach to the matching variant row (same index). Rows may have
-            // been re-indexed on save, so match positionally.
-            $rowKeys = array_keys($attrs[$fieldKey]);
-            if (isset($rowKeys[$idx])) {
-                $realKey = $rowKeys[$idx];
-                if (is_array($attrs[$fieldKey][$realKey])) {
-                    $attrs[$fieldKey][$realKey]['image'] = $url;
-                    $changed = true;
-                }
+            $url = product_variant_image_save($pid, $tmps[$idx] ?? '', $nm, $sizes[$idx] ?? 0, $errs[$idx] ?? 0);
+            if ($url && isset($attrs[$fieldKey][$idx]) && is_array($attrs[$fieldKey][$idx])) {
+                $attrs[$fieldKey][$idx]['image'] = $url;
+                $saved++;
             }
         }
     }
-
-    if (!$changed) {
-        return false;
+    if ($saved > 0) {
+        try {
+            $json = json_encode($attrs, JSON_UNESCAPED_UNICODE);
+            $stmt = $pdo->prepare("UPDATE product SET attributes = ? WHERE id = ?");
+            $stmt->execute([$json, $pid]);
+        } catch (Exception $e) {
+            error_log("product_apply_variant_images error: " . $e->getMessage());
+        }
     }
-    try {
-        $json = json_encode($attrs, JSON_UNESCAPED_UNICODE);
-        $up = $pdo->prepare("UPDATE product SET attributes = ? WHERE id = ?");
-        return $up->execute([$json, $pid]);
-    } catch (Exception $e) {
-        error_log("product_apply_variant_images save error: " . $e->getMessage());
-        return false;
-    }
+    return $saved;
 }
 
 // ===========================================================================
 // Variant schemas (custom, category-like variant templates).
+// (The per-variant image helpers product_variant_image_save() /
+//  product_apply_variant_images() are defined above, merged from main.)
 //
 // Why: a clothing product needs size/color/material/پس‌کد, a cosmetics product
 // needs volume/shade, a home appliance needs voltage/warranty — there is no
@@ -3859,6 +4234,50 @@ function shop_cart_count($from_id)
 /**
  * Unit price for a product, including a variant's price_diff when applicable.
  */
+/**
+ * Stable identifier for one product variant row. Prefers the "پس‌کد"
+ * (variant_code), then legacy SKU, then a color/size combination. Used as the
+ * key when matching a customer's chosen variant against the stored rows.
+ */
+function product_variant_key($v)
+{
+    if (!is_array($v)) {
+        return '';
+    }
+    $code = trim((string) ($v['variant_code'] ?? ''));
+    if ($code !== '') {
+        return $code;
+    }
+    $sku = trim((string) ($v['sku'] ?? ''));
+    if ($sku !== '') {
+        return $sku;
+    }
+    return trim((string) ($v['color'] ?? '') . ' ' . (string) ($v['size'] ?? ''));
+}
+
+/** Human-readable label for a variant row (for buttons / order summaries). */
+function product_variant_label($v)
+{
+    if (!is_array($v)) {
+        return '';
+    }
+    $parts = [];
+    foreach (['color', 'size'] as $k) {
+        $val = trim((string) ($v[$k] ?? ''));
+        if ($val !== '') {
+            $parts[] = $val;
+        }
+    }
+    $label = implode(' / ', $parts);
+    $code = trim((string) ($v['variant_code'] ?? ''));
+    if ($label === '') {
+        $label = $code !== '' ? $code : product_variant_key($v);
+    } elseif ($code !== '') {
+        $label .= ' (' . $code . ')';
+    }
+    return $label;
+}
+
 function shop_line_unit_price($product, $variant = null)
 {
     $base = (int) preg_replace('/[^\d]/', '', (string) ($product['price_product'] ?? '0'));
@@ -3866,10 +4285,7 @@ function shop_line_unit_price($product, $variant = null)
         $variants = product_attr($product, 'variants', null);
         if (is_array($variants)) {
             foreach ($variants as $v) {
-                $vk = trim((string) ($v['sku'] ?? '')) !== ''
-                    ? (string) $v['sku']
-                    : trim((string) ($v['color'] ?? '') . ' ' . (string) ($v['size'] ?? ''));
-                if ($vk === (string) $variant) {
+                if (product_variant_key($v) === (string) $variant) {
                     $base += (int) preg_replace('/[^\-\d]/', '', (string) ($v['price_diff'] ?? '0'));
                     break;
                 }
@@ -4242,7 +4658,26 @@ function shop_checkout_cart($from_id, $user)
             $discount   = (int) $chk['amount'];
         }
     }
-    $payable = max(0, $total - $discount);
+    $afterDiscount = max(0, $total - $discount);
+
+    // Shipping cost (Audit-3,4,5): only for carts that contain a physical item.
+    // Weight is summed from each product's 'weight' attribute; the configured
+    // weight tariff / API quote / flat cost is then applied. Non-physical carts
+    // (VPN, files, codes) get 0 and the whole block is a no-op for them.
+    $shipping = 0;
+    $hasPhysical = false;
+    foreach ($data['lines'] as $l) {
+        if (($l['product']['product_type'] ?? '') === 'physical') {
+            $hasPhysical = true;
+            break;
+        }
+    }
+    if ($hasPhysical && function_exists('calc_shipping_cost')) {
+        $weight   = function_exists('cart_total_weight') ? cart_total_weight($data['lines']) : 0;
+        $shipping = (int) calc_shipping_cost($afterDiscount, null, null, $weight);
+    }
+
+    $payable = max(0, $afterDiscount + $shipping);
     $balance = (int) ($user['Balance'] ?? 0);
 
     if ($balance < $payable) {
@@ -4273,6 +4708,11 @@ function shop_checkout_cart($from_id, $user)
         $delivered[] = ($product['name_product'] ?? '') . " ×{$qty}";
     }
 
+    // Persist the shipping cost on the first order row of this cart (Audit-3).
+    if ($shipping > 0 && !empty($orderIds[0])) {
+        update("Payment_report", "shipping_cost", $shipping, "id_order", $orderIds[0]);
+    }
+
     // Record coupon usage once for the whole cart.
     if ($couponCode !== null && $discount > 0) {
         record_discount_use($couponCode, $from_id, $orderIds[0] ?? '', $discount);
@@ -4283,10 +4723,11 @@ function shop_checkout_cart($from_id, $user)
     }
     shop_cart_clear($from_id);
 
-    $disLine = $discount > 0 ? "\nتخفیف: " . number_format($discount) . " {$cur}" : '';
+    $disLine  = $discount > 0 ? "\nتخفیف: " . number_format($discount) . " {$cur}" : '';
+    $shipLine = $shipping > 0 ? "\nهزینهٔ ارسال: " . number_format($shipping) . " {$cur}" : '';
     sendmessage(
         $from_id,
-        "✅ پرداخت موفق بود.\nمبلغ پرداختی: <b>" . number_format($payable) . "</b> {$cur}{$disLine}\nسفارش شما ثبت شد.",
+        "✅ پرداخت موفق بود.\nمبلغ کالا: " . number_format($afterDiscount) . " {$cur}{$disLine}{$shipLine}\nمبلغ پرداختی: <b>" . number_format($payable) . "</b> {$cur}\nسفارش شما ثبت شد.",
         null,
         'html'
     );
@@ -4713,6 +5154,7 @@ function shipping_carriers()
                 'sender_name'  => ['label' => 'نام فرستنده', 'type' => 'text', 'required' => false, 'hint' => ''],
                 'sender_phone' => ['label' => 'تلفن فرستنده', 'type' => 'text', 'required' => false, 'hint' => ''],
                 'origin_city'  => ['label' => 'شهر مبدأ', 'type' => 'text', 'required' => false, 'hint' => ''],
+                'quote_url'    => ['label' => 'آدرس API نرخ‌دهی (اختیاری)', 'type' => 'text', 'required' => false, 'hint' => 'سرویس/Webhook نرخ‌دهی بر اساس وزن؛ خالی = نرخ پلکانی/دستی'],
             ],
         ],
         'tipax' => [
@@ -4723,6 +5165,7 @@ function shipping_carriers()
                 'username'     => ['label' => 'نام کاربری', 'type' => 'text', 'required' => false, 'hint' => ''],
                 'customer_id'  => ['label' => 'کد مشتری / Customer ID', 'type' => 'text', 'required' => false, 'hint' => ''],
                 'origin_city'  => ['label' => 'شهر مبدأ', 'type' => 'text', 'required' => false, 'hint' => ''],
+                'quote_url'    => ['label' => 'آدرس API نرخ‌دهی (اختیاری)', 'type' => 'text', 'required' => false, 'hint' => 'اگر یک Webhook/سرویس نرخ‌دهی دارید (مثلاً در n8n) که با وزن و مقصد قیمت برمی‌گرداند، آدرسش را بگذارید تا قیمت زنده گرفته شود؛ خالی = نرخ پلکانی/دستی'],
             ],
         ],
         'chapar' => [
@@ -4755,6 +5198,36 @@ function shipping_carriers()
             'fields' => [],
         ],
     ];
+}
+
+/**
+ * Carriers the merchant has actually enabled in their shipping config, as a
+ * flat code=>name map. Used by the product form so the admin picks from the
+ * configured (API-backed) carriers instead of typing a company name by hand.
+ * Falls back to the full master list when nothing is configured yet.
+ */
+function enabled_shipping_carriers($bot_id = null)
+{
+    $all = shipping_carriers();
+    $out = [];
+    try {
+        $cfg = function_exists('get_shipping_config') ? get_shipping_config($bot_id) : [];
+        $carriers = is_array($cfg['carriers'] ?? null) ? $cfg['carriers'] : [];
+        foreach ($carriers as $code => $c) {
+            if (!empty($c['enabled']) && isset($all[$code])) {
+                $out[$code] = $all[$code]['name'];
+            }
+        }
+    } catch (Exception $e) {
+        error_log("enabled_shipping_carriers error: " . $e->getMessage());
+    }
+    // Nothing configured yet -> offer the whole master list so the form is still usable.
+    if (empty($out)) {
+        foreach ($all as $code => $c) {
+            $out[$code] = $c['name'];
+        }
+    }
+    return $out;
 }
 
 /**
@@ -4820,6 +5293,25 @@ function get_shipping_config($bot_id = null)
     $cfg['free_shipping']['enabled']   = !empty($cfg['free_shipping']['enabled']);
     $cfg['free_shipping']['min_order'] = (int) ($cfg['free_shipping']['min_order'] ?? 0);
     $cfg['default_cost']               = (int) ($cfg['default_cost'] ?? 0);
+
+    // Global weight-based tariff (base + per-kg). Optional (Audit-4).
+    $gt = is_array($cfg['weight_tariff'] ?? null) ? $cfg['weight_tariff'] : [];
+    $cfg['weight_tariff'] = [
+        'base'   => (int) ($gt['base'] ?? 0),
+        'per_kg' => (int) ($gt['per_kg'] ?? 0),
+    ];
+
+    // Normalise each carrier's per-carrier weight tariff too (if present).
+    foreach ($cfg['carriers'] as $code => &$c) {
+        if (isset($c['weight_tariff']) && is_array($c['weight_tariff'])) {
+            $c['weight_tariff'] = [
+                'base'   => (int) ($c['weight_tariff']['base'] ?? 0),
+                'per_kg' => (int) ($c['weight_tariff']['per_kg'] ?? 0),
+            ];
+        }
+    }
+    unset($c);
+
     return $cfg;
 }
 
@@ -4887,16 +5379,28 @@ function carrier_credential($carrier, $field, $bot_id = null)
 }
 
 /**
- * Compute the shipping cost for an order, honouring the free-shipping rule.
- * - If free shipping is enabled and (min_order == 0 OR order_total >= min_order)
- *   the cost is 0.
- * - Otherwise the per-carrier cost (if set) else the default_cost.
- * Returns an int cost in the store currency unit.
+ * Compute the shipping cost for an order (Audit-3,4,5).
+ *
+ * Resolution order (first match wins):
+ *   1. Free-shipping rule  -> 0
+ *   2. Live carrier API quote (if credentials present)  -> carrier_quote()
+ *   3. Weight-based tariff  (base_cost + per_kg * ceil(weight_kg))   ← real model
+ *   4. Per-carrier flat cost
+ *   5. Store default_cost
+ *
+ * @param int      $order_total   cart subtotal (for the free-shipping threshold)
+ * @param string   $carrier       carrier code, or null
+ * @param int|null $bot_id        scope
+ * @param int      $weight_grams  total parcel weight in grams (0 = unknown)
+ * @return int cost in the store currency unit
  */
-function calc_shipping_cost($order_total, $carrier = null, $bot_id = null)
+function calc_shipping_cost($order_total, $carrier = null, $bot_id = null, $weight_grams = 0)
 {
     $cfg = get_shipping_config($bot_id);
     $order_total = (int) $order_total;
+    $weight_grams = max(0, (int) $weight_grams);
+
+    // 1) Free shipping rule.
     $free = $cfg['free_shipping'];
     if (!empty($free['enabled'])) {
         $min = (int) ($free['min_order'] ?? 0);
@@ -4904,17 +5408,141 @@ function calc_shipping_cost($order_total, $carrier = null, $bot_id = null)
             return 0;
         }
     }
-    if ($carrier !== null && isset($cfg['carriers'][$carrier]['cost'])) {
-        return (int) $cfg['carriers'][$carrier]['cost'];
+
+    $cc = ($carrier !== null && isset($cfg['carriers'][$carrier]))
+        ? $cfg['carriers'][$carrier]
+        : [];
+
+    // 2) Live API quote when the merchant entered credentials for this carrier.
+    if ($carrier !== null && !empty($cc['creds']) && function_exists('carrier_quote')) {
+        $quote = carrier_quote($carrier, $weight_grams, $order_total, $cc['creds'], $bot_id);
+        if (is_int($quote) && $quote >= 0) {
+            return $quote;
+        }
     }
+
+    // 3) Weight-based tariff (base + per-kg). Used when configured for the carrier
+    //    or globally. This is how Iran Post / Tipax actually price parcels.
+    $tariff = is_array($cc['weight_tariff'] ?? null)
+        ? $cc['weight_tariff']
+        : (is_array($cfg['weight_tariff'] ?? null) ? $cfg['weight_tariff'] : null);
+    if ($tariff && $weight_grams > 0 && (!empty($tariff['base']) || !empty($tariff['per_kg']))) {
+        $base   = (int) ($tariff['base'] ?? 0);
+        $perKg  = (int) ($tariff['per_kg'] ?? 0);
+        $kg     = (int) ceil($weight_grams / 1000);
+        $kg     = max(1, $kg); // at least 1kg billed
+        return $base + ($perKg * $kg);
+    }
+
+    // 4) Per-carrier flat cost.
+    if ($carrier !== null && isset($cc['cost']) && (int) $cc['cost'] > 0) {
+        return (int) $cc['cost'];
+    }
+
+    // 5) Store default flat cost.
     return (int) ($cfg['default_cost'] ?? 0);
+}
+
+/**
+ * Live shipping-rate adapter (Audit-3). Given a carrier code + the merchant's
+ * private credentials, ask that carrier's API for a price based on weight and
+ * destination. Returns an int cost, or null to let the caller fall back to the
+ * weight tariff / flat cost.
+ *
+ * NOTE: Each carrier exposes a different REST contract and only issues working
+ * credentials to contracted merchants, so the concrete request shapes below are
+ * intentionally conservative: if the merchant supplies a custom "quote_url"
+ * credential we POST a generic JSON payload to it and read back {cost|price}.
+ * This lets a merchant (or an n8n flow) wire ANY carrier without us hard-coding
+ * each undocumented private API — while keeping a safe no-network fallback.
+ *
+ * @return int|null
+ */
+function carrier_quote($carrier, $weight_grams, $order_total, array $creds, $bot_id = null)
+{
+    // Only attempt a network call when the merchant gave us an explicit quote
+    // endpoint. Otherwise we don't know the carrier's private contract → null.
+    $quoteUrl = trim((string) ($creds['quote_url'] ?? ''));
+    if ($quoteUrl === '' || !preg_match('~^https?://~i', $quoteUrl)) {
+        return null;
+    }
+
+    $payload = [
+        'carrier'      => $carrier,
+        'weight_grams' => (int) $weight_grams,
+        'order_total'  => (int) $order_total,
+        'api_key'      => (string) ($creds['api_key'] ?? ''),
+        'origin_city'  => (string) ($creds['origin_city'] ?? ''),
+        'customer_id'  => (string) ($creds['customer_id'] ?? ''),
+    ];
+
+    $ch = curl_init($quoteUrl);
+    if ($ch === false) {
+        return null;
+    }
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST           => true,
+        CURLOPT_POSTFIELDS     => json_encode($payload, JSON_UNESCAPED_UNICODE),
+        CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
+        CURLOPT_TIMEOUT        => 6,
+        CURLOPT_CONNECTTIMEOUT => 4,
+    ]);
+    $resp = curl_exec($ch);
+    $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($resp === false || $code < 200 || $code >= 300) {
+        return null;
+    }
+    $data = json_decode((string) $resp, true);
+    if (!is_array($data)) {
+        return null;
+    }
+    // Accept either {cost: N} or {price: N} (toman/rial as the merchant defines).
+    $cost = $data['cost'] ?? ($data['price'] ?? null);
+    if ($cost === null || !is_numeric($cost)) {
+        return null;
+    }
+    return max(0, (int) $cost);
+}
+
+/**
+ * Total parcel weight (grams) for a set of cart lines. Reads the 'weight'
+ * attribute of each physical product × quantity. Non-physical lines weigh 0.
+ *
+ * @param array $lines  shop_cart_resolve()['lines']
+ * @return int grams
+ */
+function cart_total_weight(array $lines)
+{
+    $g = 0;
+    foreach ($lines as $l) {
+        $product = $l['product'] ?? [];
+        $qty     = max(1, (int) ($l['qty'] ?? 1));
+        $attrs   = [];
+        if (!empty($product['attributes'])) {
+            $attrs = is_array($product['attributes'])
+                ? $product['attributes']
+                : (json_decode((string) $product['attributes'], true) ?: []);
+        }
+        $w = (int) ($attrs['weight'] ?? 0);
+        if ($w > 0) {
+            $g += $w * $qty;
+        }
+    }
+    return $g;
 }
 
 /** True if free shipping currently applies to a given order total. */
 function is_free_shipping($order_total, $bot_id = null)
 {
-    return calc_shipping_cost($order_total, null, $bot_id) === 0
-        && !empty(get_shipping_config($bot_id)['free_shipping']['enabled']);
+    $cfg = get_shipping_config($bot_id);
+    if (empty($cfg['free_shipping']['enabled'])) {
+        return false;
+    }
+    $min = (int) ($cfg['free_shipping']['min_order'] ?? 0);
+    return $min <= 0 || (int) $order_total >= $min;
 }
 
 /**
@@ -5271,9 +5899,7 @@ function product_decrement_stock($product_id, $qty = 1, $variantKey = null)
 
     if ($variantKey !== null && !empty($attrs['variants']) && is_array($attrs['variants'])) {
         foreach ($attrs['variants'] as &$v) {
-            $vk = trim((string) ($v['sku'] ?? '')) !== ''
-                ? (string) $v['sku']
-                : trim(((string) ($v['color'] ?? '')) . '/' . ((string) ($v['size'] ?? '')), '/');
+            $vk = product_variant_key($v);
             if ($vk === (string) $variantKey && isset($v['stock']) && $v['stock'] !== '') {
                 $v['stock'] = max(0, (int) $v['stock'] - (int) $qty);
                 $changed = true;

@@ -111,6 +111,14 @@ include __DIR__ . '/inc/layout_head.php';
 <?php if ($flashOk): ?><div class="notice notice-ok"><?= htmlspecialchars($flashOk) ?></div><?php endif; ?>
 <?php if ($flashErr): ?><div class="notice notice-no"><?= htmlspecialchars($flashErr) ?></div><?php endif; ?>
 
+<!-- Transparency: clarify this page vs the per-button n8n node in the flow editor -->
+<div class="notice" style="margin-bottom:16px;line-height:1.9">
+    <div style="font-weight:800;margin-bottom:6px">🔌 این صفحه با «نود n8n» در ویرایشگر دکمه‌ها چه فرقی دارد؟</div>
+    <div>• <b>این صفحه (رویدادهای کلی):</b> رویدادهای خودکار ربات را بدون دخالت کاربر به n8n می‌فرستد — مثل «سفارش جدید ثبت شد»، «کاربر شارژ کرد» و… . یک‌بار آدرس Webhook را اینجا تعریف می‌کنید.</div>
+    <div>• <b>نود n8n در <a href="flow.php" style="font-weight:700">ویرایشگر دکمه‌ها (درختی)</a> (در لحظهٔ کلیک):</b> فقط زمانی که کاربر روی یک دکمهٔ مشخص کلیک کند اجرا می‌شود — مثل «بررسی رسید این کاربر».</div>
+    <div style="margin-top:6px;color:var(--mute)">💡 اگر آدرس Webhook را اینجا یک‌بار با یک «نام» ذخیره کنید، در نود n8n می‌توانید همان «اتصال ذخیره‌شده» را انتخاب کنید و دیگر لازم نیست آدرس و کلید امضا را دوباره وارد کنید (تعریف در یک جا، استفاده در همه‌جا).</div>
+</div>
+
 <form method="POST" action="automation.php">
     <input type="hidden" name="_csrf" value="<?= csrf_token() ?>">
     <input type="hidden" name="action" value="save_automation">

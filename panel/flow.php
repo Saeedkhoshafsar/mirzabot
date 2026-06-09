@@ -98,6 +98,9 @@ if (isset($_GET['api'])) {
 // --------------------------------------------------------------- PAGE --------
 $csrf = csrf_token();
 $nodeTypes = flow_node_types();
+// Named global n8n endpoints (defined on automation.php) so the n8n node can
+// reuse a saved connection instead of pasting the same URL twice.
+$n8nEndpoints = function_exists('flow_n8n_endpoint_options') ? flow_n8n_endpoint_options($BOT_ID) : [];
 ?>
 <!doctype html>
 <html lang="fa" dir="rtl">
@@ -753,6 +756,8 @@ $nodeTypes = flow_node_types();
     <script>
         window.FLOW_CSRF = <?= json_encode($csrf) ?>;
         window.FLOW_NODE_TYPES = <?= json_encode($nodeTypes) ?>;
+        // Named global n8n endpoints (single source of truth, managed on automation.php).
+        window.FLOW_N8N_ENDPOINTS = <?= json_encode($n8nEndpoints, JSON_UNESCAPED_UNICODE) ?>;
     </script>
     <script src="js/flow_editor.js"></script>
 </body>

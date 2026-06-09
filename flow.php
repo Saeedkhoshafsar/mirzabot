@@ -525,6 +525,15 @@ function set_button_flow(array $tree, $bot_id = null, $note = '', $created_by = 
             flow_sync_legacy_buttons($tree, $bot_id);
         }
 
+        // 5) Persist any RENAME of a main-menu (system_menu) button back into the
+        //    label-override store, so editing the button text right inside the
+        //    tree node updates the real bot keyboard. This makes the tree editor
+        //    the single place to rename buttons (Audit-8); the «برندینگ» page now
+        //    only keeps store vocabulary. Best-effort, never blocks the save.
+        if ($ok) {
+            flow_sync_menu_labels($tree, $bot_id);
+        }
+
         return ['ok' => (bool) $ok, 'error' => null, 'tree' => $tree];
     } catch (Exception $e) {
         error_log("set_button_flow error: " . $e->getMessage());
@@ -810,6 +819,11 @@ function flow_normalise_config(array $c, $type)
         }
         $out['n8n_mode']      = $mode;
         $out['n8n_endpoint']  = (string) ($c['n8n_endpoint'] ?? '');
+        // Single-source-of-truth option: instead of pasting a URL here, the admin
+        // may point this node at a *named* global endpoint defined once on the
+        // «اتوماسیون و n8n» page. When set, the URL (and HMAC secret) are resolved
+        // from automation_config at send time. Empty string = use n8n_endpoint.
+        $out['n8n_endpoint_ref'] = (string) ($c['n8n_endpoint_ref'] ?? '');
         $out['n8n_tag']       = (string) ($c['n8n_tag'] ?? '');
         $out['n8n_timeout_sec'] = max(1, min(30, (int) ($c['n8n_timeout_sec'] ?? 5)));
         $out['send_path']     = !isset($c['send_path']) ? true : !empty($c['send_path']);
@@ -1108,6 +1122,88 @@ function flow_n8n_payload(array $tree, array $cfg, array $ctx)
 }
 
 /**
+ * Resolve a named global endpoint (defined once on the «اتوماسیون و n8n» page)
+ * into its URL + HMAC secret, so an n8n flow node can reuse it instead of
+ * pasting the same URL again. This is the bridge that makes the two n8n
+ * surfaces (global event webhooks ↔ per-button flow nodes) a single source of
+ * truth for the connection details.
+ *
+ * Match is by endpoint name first, then by URL (so refs survive a rename of
+ * either side gracefully). Returns ['url'=>..., 'secret'=>...] or null.
+ * Best-effort; never throws.
+ */
+function flow_n8n_resolve_ref($ref, $bot_id = null)
+{
+    $ref = trim((string) $ref);
+    if ($ref === '') {
+        return null;
+    }
+    if (!function_exists('get_automation_config')) {
+        if (is_file(__DIR__ . '/automation.php')) {
+            require_once __DIR__ . '/automation.php';
+        }
+    }
+    if (!function_exists('get_automation_config')) {
+        return null;
+    }
+    try {
+        $cfg = get_automation_config($bot_id === null ? flow_bot_id() : $bot_id);
+        $secret = (string) ($cfg['secret'] ?? '');
+        $eps = is_array($cfg['endpoints'] ?? null) ? $cfg['endpoints'] : [];
+        foreach ($eps as $ep) {
+            if (!is_array($ep)) {
+                continue;
+            }
+            $name = (string) ($ep['name'] ?? '');
+            $url  = (string) ($ep['url'] ?? '');
+            if ($name === $ref || $url === $ref) {
+                return ['url' => $url, 'secret' => $secret];
+            }
+        }
+    } catch (Throwable $e) {
+        error_log('flow_n8n_resolve_ref error: ' . $e->getMessage());
+    }
+    return null;
+}
+
+/**
+ * List the named global endpoints (for the editor's "reuse a saved connection"
+ * dropdown). Returns [ ['name'=>.., 'url'=>..], ... ]. Best-effort.
+ */
+function flow_n8n_endpoint_options($bot_id = null)
+{
+    if (!function_exists('get_automation_config')) {
+        if (is_file(__DIR__ . '/automation.php')) {
+            require_once __DIR__ . '/automation.php';
+        }
+    }
+    if (!function_exists('get_automation_config')) {
+        return [];
+    }
+    $out = [];
+    try {
+        $cfg = get_automation_config($bot_id === null ? flow_bot_id() : $bot_id);
+        $eps = is_array($cfg['endpoints'] ?? null) ? $cfg['endpoints'] : [];
+        foreach ($eps as $ep) {
+            if (!is_array($ep)) {
+                continue;
+            }
+            $url = (string) ($ep['url'] ?? '');
+            if ($url === '') {
+                continue;
+            }
+            $out[] = [
+                'name' => (string) ($ep['name'] ?? ''),
+                'url'  => $url,
+            ];
+        }
+    } catch (Throwable $e) {
+        error_log('flow_n8n_endpoint_options error: ' . $e->getMessage());
+    }
+    return $out;
+}
+
+/**
  * Send an n8n payload to the configured endpoint.
  * - async: fire-and-forget POST with a very short timeout so the bot never
  *   blocks; n8n is expected to call us back on the callback_url later.
@@ -1117,7 +1213,20 @@ function flow_n8n_payload(array $tree, array $cfg, array $ctx)
  */
 function flow_n8n_send(array $cfg, array $payload)
 {
-    $url = trim((string) ($cfg['n8n_endpoint'] ?? ''));
+    // Resolve where to send. Priority:
+    //   1) named global endpoint (n8n_endpoint_ref) — single source of truth,
+    //      managed once on the «اتوماسیون و n8n» page; signs with the global secret.
+    //   2) the per-node URL (n8n_endpoint) pasted directly into this node.
+    $url    = trim((string) ($cfg['n8n_endpoint'] ?? ''));
+    $secret = '';
+    $ref    = trim((string) ($cfg['n8n_endpoint_ref'] ?? ''));
+    if ($ref !== '') {
+        $resolved = flow_n8n_resolve_ref($ref);
+        if ($resolved !== null) {
+            $url    = (string) $resolved['url'];
+            $secret = (string) $resolved['secret'];
+        }
+    }
     if ($url === '' || !preg_match('~^https?://~i', $url)) {
         return ['ok' => false, 'mode' => $cfg['n8n_mode'] ?? 'async', 'response' => null, 'error' => 'bad_endpoint'];
     }
@@ -1128,11 +1237,19 @@ function flow_n8n_send(array $cfg, array $payload)
         return ['ok' => false, 'mode' => $mode, 'response' => null, 'error' => 'no_curl'];
     }
 
+    // When using a named global endpoint we sign the body with the same HMAC
+    // secret the «اتوماسیون و n8n» page exposes, so n8n can verify both the
+    // event webhooks AND these per-button calls with one secret.
+    $headers = ['Content-Type: application/json'];
+    if ($secret !== '') {
+        $headers[] = 'X-Signature: sha256=' . hash_hmac('sha256', $body, $secret);
+    }
+
     $ch = curl_init($url);
     curl_setopt_array($ch, [
         CURLOPT_POST           => true,
         CURLOPT_POSTFIELDS     => $body,
-        CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
+        CURLOPT_HTTPHEADER     => $headers,
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_NOSIGNAL       => true,
     ]);
@@ -1481,6 +1598,51 @@ function flow_sync_legacy_buttons(array $tree, $bot_id = null)
         }
     } catch (Throwable $e) {
         error_log('flow_sync_legacy_buttons error: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Persist renamed main-menu buttons from the tree back into the label-override
+ * store (bot_label). Each system_menu node carries a 'menu_key' (e.g.
+ * text_sell) which maps via flow_main_menu_map() to a language key (e.g. sell).
+ * When the node's label differs from the resolved default we store an override;
+ * when it equals the default we clear any override (stay clean). This makes the
+ * tree node the single place to rename a button (Audit-8).
+ *
+ * Best-effort: never throws; does nothing if the label helpers are missing.
+ */
+function flow_sync_menu_labels(array $tree, $bot_id = null)
+{
+    if (!function_exists('set_bot_label') || !function_exists('bot_label_default')) {
+        return;
+    }
+    $bot_id = flow_bot_id($bot_id);
+    $map = flow_main_menu_map();
+    $lang = 'fa'; // panel edits the default (Persian) labels, same as labels.php
+    try {
+        foreach ($tree['nodes'] as $n) {
+            if (($n['node_kind'] ?? '') !== 'system_menu') {
+                continue;
+            }
+            $menuKey = (string) ($n['menu_key'] ?? '');
+            if ($menuKey === '' || !isset($map[$menuKey])) {
+                continue;
+            }
+            $langKey = (string) $map[$menuKey]['lang'];
+            if ($langKey === '') {
+                continue;
+            }
+            $newLabel = trim((string) ($n['label'] ?? ''));
+            $default  = (string) bot_label_default($langKey, $lang);
+            if ($newLabel === '' || $newLabel === $default) {
+                // unchanged / cleared -> remove override to fall back to default
+                set_bot_label($langKey, $lang, null, $bot_id);
+            } else {
+                set_bot_label($langKey, $lang, $newLabel, $bot_id);
+            }
+        }
+    } catch (Throwable $e) {
+        error_log('flow_sync_menu_labels error: ' . $e->getMessage());
     }
 }
 

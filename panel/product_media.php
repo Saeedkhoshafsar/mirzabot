@@ -17,9 +17,6 @@ if (!$product) {
     exit;
 }
 
-$uploadDirAbs = dirname(__DIR__) . '/uploads/products';
-$relPrefix    = 'uploads/products'; // relative to project root, stored in DB
-
 // --- Handle delete ---
 if (isset($_GET['delete'])) {
     csrf_check_get();
@@ -39,41 +36,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'uploa
         exit;
     }
 
-    if (!is_dir($uploadDirAbs)) {
-        @mkdir($uploadDirAbs, 0755, true);
-    }
-
-    $maxBytes = 25 * 1024 * 1024; // 25 MB per file
-    $okCount = 0;
-    $errCount = 0;
-    $names = $_FILES['media']['name'];
-
-    for ($i = 0; $i < count($names); $i++) {
-        if (($_FILES['media']['error'][$i] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
-            continue;
-        }
-        $tmp  = $_FILES['media']['tmp_name'][$i];
-        $size = (int) ($_FILES['media']['size'][$i] ?? 0);
-        if ($size <= 0 || $size > $maxBytes) {
-            $errCount++;
-            continue;
-        }
-        $detect = product_media_detect($tmp, $names[$i]);
-        if ($detect === null) {
-            $errCount++;
-            continue; // disallowed type
-        }
-        [$mediaType, $ext] = $detect;
-        $fname = $pid . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
-        $dest  = $uploadDirAbs . '/' . $fname;
-        if (@move_uploaded_file($tmp, $dest)) {
-            @chmod($dest, 0644);
-            product_media_add($pid, $relPrefix . '/' . $fname, $mediaType);
-            $okCount++;
-        } else {
-            $errCount++;
-        }
-    }
+    // Shared upload logic (also used by the in-form uploader on product.php).
+    $counts   = product_media_handle_upload($pid, $_FILES['media']);
+    $okCount  = $counts['ok'];
+    $errCount = $counts['err'];
 
     if ($okCount > 0) {
         flash('success', $okCount . ' فایل با موفقیت آپلود شد.' . ($errCount ? ' (' . $errCount . ' فایل ناموفق)' : ''));
@@ -109,6 +75,16 @@ include __DIR__ . '/inc/layout_head.php';
 <?php if ($flashErr): ?>
     <div class="notice notice-no"><?= htmlspecialchars($flashErr) ?></div>
 <?php endif; ?>
+<?php if (($_GET['from'] ?? '') === 'add'): ?>
+    <div class="notice" style="display:flex;align-items:flex-start;gap:8px">
+        <?= icon('image', 18) ?>
+        <span style="font-size:.85rem;line-height:1.7">
+            <b>محصول ثبت شد ✓</b> این آخرین قدم است: از کادر زیر یک یا چند فایل (عکس/ویدیو/صوت) انتخاب کنید و دکمهٔ
+            <b>«آپلود»</b> را بزنید. اگر نمی‌خواهید تصویری اضافه کنید، می‌توانید
+            <a href="product.php" style="color:var(--accent)">به فهرست محصولات برگردید</a>.
+        </span>
+    </div>
+<?php endif; ?>
 
 <div class="card fade-up d1" style="margin-bottom:16px">
     <div class="card-head">
@@ -122,11 +98,20 @@ include __DIR__ . '/inc/layout_head.php';
             <input type="hidden" name="_csrf" value="<?= csrf_token() ?>">
             <input type="hidden" name="action" value="upload">
             <input type="hidden" name="pid" value="<?= $pid ?>">
-            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-                <input type="file" name="media[]" multiple
+            <label for="mediaInput" id="dropZone"
+                style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;
+                       border:2px dashed var(--bd);border-radius:12px;padding:26px 16px;cursor:pointer;
+                       text-align:center;transition:border-color .15s,background .15s;background:var(--sf2)">
+                <?= icon('image', 30) ?>
+                <div style="font-weight:700;color:var(--text)">برای انتخاب فایل کلیک کنید</div>
+                <div style="font-size:.78rem;color:var(--mute)">یا فایل را همین‌جا رها (drag &amp; drop) کنید — می‌توانید چند فایل را با هم انتخاب کنید</div>
+                <div id="mediaPicked" style="font-size:.8rem;color:var(--accent);font-weight:700;min-height:1em"></div>
+                <input type="file" name="media[]" id="mediaInput" multiple
                     accept="image/*,video/mp4,video/webm,audio/mpeg,audio/ogg,audio/wav"
-                    class="input" style="flex:1;min-width:220px;padding:8px">
-                <button type="submit" class="btn btn-primary"><?= icon('plus', 14) ?> آپلود</button>
+                    style="display:none">
+            </label>
+            <div style="margin-top:12px;display:flex;justify-content:flex-end">
+                <button type="submit" class="btn btn-primary"><?= icon('plus', 14) ?> آپلود فایل‌های انتخاب‌شده</button>
             </div>
         </form>
     </div>
@@ -169,5 +154,46 @@ include __DIR__ . '/inc/layout_head.php';
         <?php endif; ?>
     </div>
 </div>
+
+<script>
+  (function () {
+    var input = document.getElementById('mediaInput');
+    var zone = document.getElementById('dropZone');
+    var picked = document.getElementById('mediaPicked');
+    if (!input || !zone) return;
+
+    function showFiles(files) {
+      if (!files || !files.length) { picked.textContent = ''; return; }
+      var names = [];
+      for (var i = 0; i < files.length && i < 5; i++) names.push(files[i].name);
+      var label = files.length + ' فایل انتخاب شد: ' + names.join('، ');
+      if (files.length > 5) label += ' …';
+      picked.textContent = label;
+    }
+
+    input.addEventListener('change', function () { showFiles(input.files); });
+
+    ['dragenter', 'dragover'].forEach(function (ev) {
+      zone.addEventListener(ev, function (e) {
+        e.preventDefault(); e.stopPropagation();
+        zone.style.borderColor = 'var(--accent)';
+        zone.style.background = 'var(--accent-s, rgba(99,102,241,.08))';
+      });
+    });
+    ['dragleave', 'drop'].forEach(function (ev) {
+      zone.addEventListener(ev, function (e) {
+        e.preventDefault(); e.stopPropagation();
+        zone.style.borderColor = 'var(--bd)';
+        zone.style.background = 'var(--sf2)';
+      });
+    });
+    zone.addEventListener('drop', function (e) {
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+        input.files = e.dataTransfer.files;
+        showFiles(input.files);
+      }
+    });
+  })();
+</script>
 
 <?php include __DIR__ . '/inc/layout_foot.php'; ?>
