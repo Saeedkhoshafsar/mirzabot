@@ -545,7 +545,7 @@ include __DIR__ . '/inc/layout_head.php';
   // Enabled (API-backed) shipping carriers the admin can attach to a product.
   window.SHIPPING_CARRIERS = <?= json_encode(function_exists('enabled_shipping_carriers') ? enabled_shipping_carriers() : [], JSON_UNESCAPED_UNICODE) ?>;
 </script>
-<script src="js/product.js"></script>
+<script src="js/product.js?v=<?= @filemtime(__DIR__ . '/js/product.js') ?: time() ?>"></script>
 <script>
   // Render attribute fields for the profile-preselected type in the add form
   // so the right fields appear immediately (step 8e: profile shapes the UI).
