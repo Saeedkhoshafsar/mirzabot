@@ -13,6 +13,6 @@
 </nav>
 </div>
 
-<script src="js/app.js"></script>
+<script src="js/app.js?v=<?= @filemtime(__DIR__ . '/../js/app.js') ?: time() ?>"></script>
 </body>
 </html>
