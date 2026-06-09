@@ -250,6 +250,11 @@ include __DIR__ . '/inc/layout_head.php';
                     onclick="openEditModal(<?= htmlspecialchars(json_encode($p), ENT_QUOTES) ?>)">
                     <?= icon('edit', 13) ?>
                   </button>
+                  <button class="btn btn-ghost btn-sm btn-icon"
+                    title="نمایش / پیش‌نمایش در ربات تلگرام"
+                    onclick="openProductPreview(<?= (int) $p['id'] ?>, <?= htmlspecialchars(json_encode($p['name_product'] ?? ''), ENT_QUOTES) ?>)">
+                    <?= icon('eye', 13) ?>
+                  </button>
                   <?php $mediaCount = function_exists('product_media_count') ? product_media_count((int) $p['id']) : 0; ?>
                   <a href="product_media.php?pid=<?= (int) $p['id'] ?>"
                     class="btn <?= $mediaCount > 0 ? 'btn-ghost' : 'btn-primary' ?> btn-sm"
@@ -496,6 +501,23 @@ include __DIR__ . '/inc/layout_head.php';
   </div>
 </div>
 
+<!-- Live preview of how a product appears in the Telegram bot (loaded in an iframe). -->
+<div class="modal-veil" id="previewModal">
+  <div class="modal" style="max-width:820px;width:96%">
+    <div class="modal-head">
+      <h3><?= icon('eye', 15) ?> نمایش در ربات — <span id="previewProdName"></span></h3>
+      <div style="display:flex;gap:8px;align-items:center">
+        <a href="#" id="previewOpenFull" target="_blank" class="btn btn-ghost btn-sm" title="باز کردن در صفحهٔ کامل"><?= icon('zap', 13) ?> صفحهٔ کامل</a>
+        <button class="modal-x" onclick="closeModal('previewModal')"><?= icon('close', 14) ?></button>
+      </div>
+    </div>
+    <div class="modal-body" style="padding:0">
+      <iframe id="previewFrame" src="about:blank" title="پیش‌نمایش محصول"
+        style="width:100%;height:600px;border:0;display:block;background:var(--bg,#0b1220)"></iframe>
+    </div>
+  </div>
+</div>
+
 <style>
   .field-hint { color: var(--mute); font-size: 12px; margin-top: 4px; }
   .rep-field .rep-wrap { overflow-x: auto; border: 1px solid var(--bd); border-radius: 10px; }
@@ -629,6 +651,17 @@ include __DIR__ . '/inc/layout_head.php';
       renderAttrFields('add');
     }
   });
+
+  // Open the Telegram-bot preview for a product inside a modal iframe.
+  window.openProductPreview = function (pid, name) {
+    var frame = document.getElementById('previewFrame');
+    var nameEl = document.getElementById('previewProdName');
+    var fullLink = document.getElementById('previewOpenFull');
+    if (nameEl) nameEl.textContent = name || '';
+    if (fullLink) fullLink.href = 'product_preview.php?pid=' + encodeURIComponent(pid);
+    if (frame) frame.src = 'product_preview.php?pid=' + encodeURIComponent(pid) + '&embed=1';
+    if (typeof openModal === 'function') openModal('previewModal');
+  };
 </script>
 
 <?php include __DIR__ . '/inc/layout_foot.php'; ?>

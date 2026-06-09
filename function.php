@@ -2016,15 +2016,19 @@ function product_types()
                 ['key' => 'weight',        'label' => 'وزن (گرم)', 'type' => 'number', 'hint' => 'برای محاسبهٔ هزینهٔ ارسال'],
                 ['key' => 'needs_address', 'label' => 'نیاز به آدرس پستی', 'type' => 'bool', 'hint' => 'دریافت آدرس هنگام خرید'],
                 // Single-stock fields (used when the product has NO variants/پس‌کد).
-                ['key' => 'sku',           'label' => 'کد انبار (SKU)', 'type' => 'text', 'hint' => 'اختیاری — فقط وقتی پس‌کد/تنوع ندارید'],
-                ['key' => 'stock',         'label' => 'موجودی کل', 'type' => 'number', 'hint' => 'فقط وقتی پس‌کد/تنوع ندارید'],
+                // hide_when=has_variants → these are auto-hidden & disabled once the
+                // seller ticks "پس‌کد/تنوع دارد", because in that mode the real
+                // stock/code live per-variant (inside the variants table). This
+                // prevents the confusing "two stock fields" the seller noticed.
+                ['key' => 'sku',           'label' => 'کد انبار (SKU)', 'type' => 'text', 'hide_when' => 'has_variants', 'hint' => 'اختیاری — فقط وقتی پس‌کد/تنوع ندارید'],
+                ['key' => 'stock',         'label' => 'موجودی کل', 'type' => 'number', 'hide_when' => 'has_variants', 'hint' => 'فقط وقتی پس‌کد/تنوع ندارید. وقتی تنوع فعال است، موجودی از مجموع موجودیِ تنوع‌ها محاسبه می‌شود.'],
 
                 // Gate: enabling "پس‌کد/تنوع" reveals the variants table. When this
                 // is checked the product is treated as multi-variant (e.g. several
                 // colors), each variant carries its own code, stock, price & image,
                 // and the single SKU/stock above are ignored.
                 ['key' => 'has_variants', 'label' => 'این محصول پس‌کد/تنوع دارد (چند رنگ/سایز)', 'type' => 'bool',
-                 'hint' => 'با تیک‌زدن، می‌توانید ویژگی‌های دلخواه (رنگ، سایز، جنس، …) را خودتان بسازید و برای هر تنوع پس‌کد، موجودی، قیمت و تصویر جدا ثبت کنید.'],
+                 'hint' => 'با تیک‌زدن، فیلدهای «کد انبار» و «موجودی کل» بالا غیرفعال می‌شوند و در عوض می‌توانید ویژگی‌های دلخواه (رنگ، سایز، جنس، …) را خودتان بسازید و برای هر تنوع پس‌کد، موجودی، قیمت و تصویر جدا ثبت کنید. موجودی کل محصول از مجموع موجودیِ همان تنوع‌ها محاسبه می‌شود.'],
 
                 // Variants: an INLINE attribute builder. The seller defines the
                 // columns themselves with "افزودن ویژگی" (pick type text/number/
@@ -2192,6 +2196,16 @@ function set_product_type($product_id, $type, array $attributes = [], array $kee
         $variantCols = variant_normalize_columns($attributes['_variant_cols']);
     }
 
+    // When the product has variants, the single موجودی کل / SKU inputs are
+    // disabled in the UI and their values must NOT be persisted — stock & code
+    // live per-variant instead. Compute the gate once so we can drop any
+    // hide_when=has_variants field whose gate is currently ON (covers both a
+    // fresh submit and a stale value left over from before تنوع was enabled).
+    $hasVariantsOn = (function ($a) {
+        $hv = $a['has_variants'] ?? null;
+        return ($hv === '1' || $hv === 1 || $hv === true || $hv === 'on');
+    })($attributes);
+
     $clean = [];
     if ($variantSchemaId > 0) {
         $clean['_variant_schema'] = $variantSchemaId;
@@ -2208,6 +2222,16 @@ function set_product_type($product_id, $type, array $attributes = [], array $kee
         }
         $def = $fieldDefs[$k];
         $ftype = $def['type'] ?? 'text';
+
+        // Drop fields gated by hide_when when their gate (e.g. has_variants) is
+        // ON, so موجودی کل / SKU never compete with the per-variant values.
+        if (!empty($def['hide_when'])) {
+            $gate = $def['hide_when'];
+            $gateOn = ($gate === 'has_variants') ? $hasVariantsOn : false;
+            if ($gateOn) {
+                continue;
+            }
+        }
 
         if ($ftype === 'repeater') {
             // Expect an array of rows; keep only declared columns, drop empty rows.
@@ -4316,34 +4340,37 @@ function shop_handle_search_step($step, $text, $from_id, $user)
 }
 
 /**
- * Render a shop product to the user: media (image/video/audio) + caption with
- * name, description and price, plus a Buy / Back inline keyboard.
+ * Build the exact message a customer would see for a shop product:
+ *   - media  : array of [type, ref, url] for the first few attachments
+ *   - caption: the HTML caption (name, note, price, stock badge)
+ *   - keyboard: inline_keyboard rows (Buy / cart / coupon / back)
+ *
+ * This is the single source of truth shared by shop_render_product() (which
+ * actually sends it to Telegram) and the admin "نمایش/Preview" panel
+ * (product_preview.php) so the demo always matches the real bot output.
  */
-function shop_render_product($from_id, $product)
+function shop_product_view_data($product)
 {
+    global $domainhosts;
     $cur   = store_currency();
     $price = (int) preg_replace('/[^\d]/', '', (string) ($product['price_product'] ?? '0'));
     $avail = shop_product_available($product);
 
-    // Send any attached media first (best-effort, non-blocking).
-    // Prefer a cached Telegram file_id; otherwise fall back to the public URL
-    // ($domainhosts/uploads/...). Only the first few media are sent to avoid spam.
-    global $domainhosts;
-    $media = array_slice(product_media_list((int) $product['id']), 0, 5);
-    foreach ($media as $m) {
-        $ref = !empty($m['telegram_file_id'])
-            ? $m['telegram_file_id']
-            : (!empty($domainhosts) ? rtrim($domainhosts, '/') . '/' . ltrim($m['file_path'], '/') : null);
+    // Resolve the first few media (image/video/audio) with a usable reference.
+    $media = [];
+    foreach (array_slice(product_media_list((int) $product['id']), 0, 5) as $m) {
+        $url = (!empty($domainhosts))
+            ? rtrim((strpos($domainhosts, 'http') === 0 ? $domainhosts : 'https://' . $domainhosts), '/') . '/' . ltrim($m['file_path'], '/')
+            : ltrim((string) $m['file_path'], '/');
+        $ref = !empty($m['telegram_file_id']) ? $m['telegram_file_id'] : $url;
         if (!$ref) {
             continue;
         }
-        if ($m['media_type'] === 'image') {
-            sendphoto($from_id, $ref, '');
-        } elseif ($m['media_type'] === 'video') {
-            sendvideo($from_id, $ref, '');
-        } elseif ($m['media_type'] === 'audio') {
-            telegram('sendAudio', ['chat_id' => $from_id, 'audio' => $ref, 'caption' => '']);
-        }
+        $media[] = [
+            'type' => $m['media_type'] ?? 'image',
+            'ref'  => $ref,
+            'url'  => $url, // public URL (used by the preview to actually show it)
+        ];
     }
 
     $lines = [];
@@ -4390,7 +4417,36 @@ function shop_render_product($from_id, $product)
         ['text' => "🔙 بازگشت", 'callback_data' => "backuser"],
     ];
 
-    sendmessage($from_id, $caption, json_encode($kb), 'html');
+    return [
+        'media'    => $media,
+        'caption'  => $caption,
+        'keyboard' => $kb['inline_keyboard'],
+        'available' => $avail,
+        'price'    => $price,
+        'currency' => $cur,
+    ];
+}
+
+/**
+ * Render a shop product to the user: media (image/video/audio) + caption with
+ * name, description and price, plus a Buy / Back inline keyboard.
+ */
+function shop_render_product($from_id, $product)
+{
+    $view = shop_product_view_data($product);
+
+    // Send any attached media first (best-effort, non-blocking).
+    foreach ($view['media'] as $m) {
+        if ($m['type'] === 'image') {
+            sendphoto($from_id, $m['ref'], '');
+        } elseif ($m['type'] === 'video') {
+            sendvideo($from_id, $m['ref'], '');
+        } elseif ($m['type'] === 'audio') {
+            telegram('sendAudio', ['chat_id' => $from_id, 'audio' => $m['ref'], 'caption' => '']);
+        }
+    }
+
+    sendmessage($from_id, $view['caption'], json_encode(['inline_keyboard' => $view['keyboard']]), 'html');
 }
 
 /**
