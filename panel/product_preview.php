@@ -57,48 +57,75 @@ $captionHtml = tg_caption_to_html($view['caption']);
 // Variants (for physical products with تنوع) — show a small selector demo.
 $attrs = function_exists('product_attributes') ? product_attributes($product) : [];
 
-// Product "code" preference: the seller's کد انبار (SKU) when present, else the
-// auto-generated code_product. The SKU may be a single attr (no variants) or
-// supplied per-variant; for the header we use the single-stock SKU when set.
-$skuVal = '';
-if (isset($attrs['sku']) && trim((string) $attrs['sku']) !== '') {
-    $skuVal = trim((string) $attrs['sku']);
-}
-$productCode = $skuVal !== '' ? $skuVal : (string) ($product['code_product'] ?? '');
-$codeIsSku   = ($skuVal !== '');
+// Product "code" preference: the seller's کد انبار (SKU) when present — whether
+// at product level or supplied per-variant — over the auto-generated code_product.
+// product_display_code() already resolves all of these consistently.
+$dcPrev      = function_exists('product_display_code')
+    ? product_display_code($product)
+    : ['code' => (string) ($product['code_product'] ?? ''), 'is_sku' => false];
+$productCode = $dcPrev['code'];
+$codeIsSku   = !empty($dcPrev['is_sku']);
 
 $variants = [];
 if ($ptype === 'physical' && !empty($attrs['variants']) && is_array($attrs['variants'])) {
-    $cols = [];
-    if (!empty($attrs['_variant_cols']) && function_exists('variant_columns_with_builtins')
-        && function_exists('variant_normalize_columns')) {
-        $cols = variant_columns_with_builtins(variant_normalize_columns($attrs['_variant_cols']));
+    // Keys that are NOT a real "variation" axis: stock/price/image are builtins,
+    // and the code column(s) (کد انبار) are shown as the product code, not as a
+    // variation label. We must NOT print the code (e.g. 5555) in the تنوع column.
+    $codeKeys = function_exists('product_variant_code_keys')
+        ? product_variant_code_keys($attrs)
+        : ['sku'];
+    $skip = array_merge(['stock', 'price_diff', 'image'], $codeKeys);
+
+    // Map keys → labels (so the variation label reads like "رنگ: قرمز").
+    $colLabels = [];
+    if (!empty($attrs['_variant_cols']) && function_exists('variant_normalize_columns')) {
+        foreach (variant_normalize_columns($attrs['_variant_cols']) as $c) {
+            $colLabels[$c['key']] = $c['label'] ?? $c['key'];
+        }
     }
+
     foreach ($attrs['variants'] as $v) {
         if (!is_array($v)) {
             continue;
         }
-        $label = function_exists('product_variant_label') ? trim(product_variant_label($v)) : '';
-        if ($label === '') {
-            // Build a label from non-reserved columns.
-            $parts = [];
-            foreach ($v as $ck => $cv) {
-                if (in_array($ck, ['stock', 'price_diff', 'image', 'sku'], true)) {
-                    continue;
-                }
-                if (is_array($cv)) {
-                    continue;
-                }
-                $cv = trim((string) $cv);
-                if ($cv !== '') {
-                    $parts[] = $cv;
-                }
+        // Build a variation label ONLY from genuine variation columns.
+        $parts = [];
+        foreach ($v as $ck => $cv) {
+            if (in_array($ck, $skip, true) || is_array($cv)) {
+                continue;
             }
-            $label = implode(' / ', $parts);
+            $cv = trim((string) $cv);
+            if ($cv === '') {
+                continue;
+            }
+            $cl = $colLabels[$ck] ?? '';
+            $parts[] = $cl !== '' ? ($cl . ': ' . $cv) : $cv;
         }
+        $label = implode(' / ', $parts);
+
         $stock = isset($v['stock']) && $v['stock'] !== '' ? (int) $v['stock'] : null;
         $diff  = isset($v['price_diff']) && $v['price_diff'] !== '' ? (int) $v['price_diff'] : 0;
-        $variants[] = ['label' => $label ?: 'تنوع', 'stock' => $stock, 'diff' => $diff];
+        // Code value for THIS row (first non-empty code column).
+        $rowCode = '';
+        foreach ($codeKeys as $ck) {
+            if (isset($v[$ck]) && !is_array($v[$ck]) && trim((string) $v[$ck]) !== '') {
+                $rowCode = trim((string) $v[$ck]);
+                break;
+            }
+        }
+        $variants[] = ['label' => $label, 'code' => $rowCode, 'stock' => $stock, 'diff' => $diff];
+    }
+}
+
+// A product has "real" variations only when at least one row carries a genuine
+// variation label (رنگ، سایز، …). A single row that only has a code+stock is NOT
+// a variation — it is just the product's own کد انبار + موجودی, so we hide the
+// تنوع table and show the code as the product code instead.
+$hasRealVariations = false;
+foreach ($variants as $vrow) {
+    if (trim((string) $vrow['label']) !== '') {
+        $hasRealVariations = true;
+        break;
     }
 }
 
@@ -297,16 +324,17 @@ if (!$embed) {
       </span></div>
     </div>
 
-    <?php if (!empty($variants)): ?>
+    <?php if ($hasRealVariations): ?>
       <div class="pv-info-card">
         <h4><?= icon('card', 15) ?> تنوع‌ها (پس‌کد) — انتخابی مشتری</h4>
-        <p class="pv-note" style="margin-top:0">مشتری هنگام خرید یکی از این تنوع‌ها را انتخاب می‌کند. موجودی کل بالا برابر مجموع موجودی همین تنوع‌هاست.</p>
+        <p class="pv-note" style="margin-top:0">هر ردیف یک پس‌کد است؛ مشتری هنگام خرید یکی از این تنوع‌ها را انتخاب می‌کند. موجودی کل بالا برابر مجموع موجودی همین تنوع‌هاست.</p>
         <table class="pv-var-tbl">
-          <thead><tr><th>تنوع</th><th>موجودی</th><th>اختلاف قیمت</th></tr></thead>
+          <thead><tr><th>تنوع</th><th>کد انبار</th><th>موجودی</th><th>اختلاف قیمت</th></tr></thead>
           <tbody>
             <?php foreach ($variants as $v): ?>
               <tr>
-                <td><?= htmlspecialchars($v['label']) ?></td>
+                <td><?= htmlspecialchars($v['label'] !== '' ? $v['label'] : 'تنوع') ?></td>
+                <td style="font-family:monospace"><?= $v['code'] !== '' ? htmlspecialchars($v['code']) : '—' ?></td>
                 <td><?= $v['stock'] === null ? '—' : number_format($v['stock']) ?></td>
                 <td><?= $v['diff'] === 0 ? '—' : (($v['diff'] > 0 ? '+' : '') . number_format($v['diff'])) ?></td>
               </tr>
