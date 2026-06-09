@@ -12,16 +12,32 @@ function product_variant_keep_rows()
 {
     $keep = [];
     $mv = $_FILES['media_variant'] ?? null;
-    if (!is_array($mv) || !isset($mv['name']) || !is_array($mv['name'])) {
+    if (!is_array($mv) || !isset($mv['error']) || !is_array($mv['error'])) {
         return $keep;
     }
-    foreach ($mv['name'] as $fieldKey => $rows) {
+    // The error tree mirrors the input nesting:
+    //   legacy: error[fieldKey][idx]                (scalar)
+    //   new:    error[fieldKey][idx][colKey][slot]  (nested)
+    // For each fieldKey/idx, keep the row if ANY contained slot uploaded OK.
+    foreach ($mv['error'] as $fieldKey => $rows) {
         if (!is_array($rows)) {
             continue;
         }
-        foreach ($rows as $idx => $nm) {
-            $err = $mv['error'][$fieldKey][$idx] ?? UPLOAD_ERR_NO_FILE;
-            if ($err === UPLOAD_ERR_OK) {
+        foreach ($rows as $idx => $rowErr) {
+            $ok = false;
+            $stack = [$rowErr];
+            while ($stack) {
+                $cur = array_pop($stack);
+                if (is_array($cur)) {
+                    foreach ($cur as $sub) {
+                        $stack[] = $sub;
+                    }
+                } elseif ((int) $cur === UPLOAD_ERR_OK) {
+                    $ok = true;
+                    break;
+                }
+            }
+            if ($ok) {
                 $keep[$fieldKey][] = (string) $idx;
             }
         }
@@ -513,6 +529,10 @@ include __DIR__ . '/inc/layout_head.php';
   }
   .rep-img-btn { font-size: 11px; color: var(--accent, #3b82f6); font-weight: 700; }
 
+  /* Several image slots in one cell sit side by side and wrap. */
+  .rep-img-cell { white-space: normal; }
+  .rep-img-cell .rep-img-pick { margin: 2px; }
+
   /* "این محصول پس‌کد دارد" badge shown when >1 variant. */
   .rep-pscode-badge {
     display: inline-block; margin-right: 8px; padding: 2px 10px;
@@ -520,6 +540,59 @@ include __DIR__ . '/inc/layout_head.php';
     color: #b45309; background: #fef3c7; border: 1px solid #fde68a;
     vertical-align: middle;
   }
+
+  /* ---- Inline variant attribute BUILDER ---- */
+  .vb-bar {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    margin: 8px 0; padding: 8px; border: 1px dashed var(--bd, #cbd5e1);
+    border-radius: 10px; background: var(--sf2, rgba(148,163,184,.06));
+  }
+  .vb-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 6px 4px 10px; border-radius: 999px;
+    background: rgba(59,130,246,.10); border: 1px solid #3b82f6;
+    font-size: 12px; font-weight: 600; color: var(--fg, #e2e8f0);
+  }
+  .vb-chip-type {
+    font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 999px;
+    background: #3b82f6; color: #fff;
+  }
+  .vb-chip-x {
+    border: none; background: transparent; cursor: pointer; color: #ef4444;
+    font-size: 15px; line-height: 1; padding: 0 2px; font-weight: 700;
+  }
+  .vb-add { font-size: 12px; }
+  .vb-picker {
+    margin: 6px 0 10px; padding: 12px; border: 1px solid var(--bd, #cbd5e1);
+    border-radius: 10px; background: var(--sf, rgba(148,163,184,.08));
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .vb-picker-row { display: flex; flex-direction: column; gap: 4px; }
+  .vb-lbl { font-size: 12px; font-weight: 600; color: var(--mute, #94a3b8); }
+  .vb-picker .input { width: 100%; box-sizing: border-box; }
+  .vb-picker-actions { display: flex; gap: 8px; }
+  /* checkbox option line (required / allow-custom) */
+  .vb-chk { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; user-select: none; }
+  .vb-chk input { margin: 0; cursor: pointer; }
+  /* file-format multi-select grid */
+  .vb-formats { display: flex; flex-wrap: wrap; gap: 6px; }
+  .vb-fmt {
+    display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px;
+    border: 1px solid var(--bd, #cbd5e1); border-radius: 999px; cursor: pointer;
+    font-size: 12px; user-select: none; transition: background .15s, border-color .15s;
+  }
+  .vb-fmt:hover { border-color: #3b82f6; }
+  .vb-fmt input { margin: 0; cursor: pointer; }
+  .vb-fmt:has(input:checked) { background: rgba(59,130,246,.12); border-color: #3b82f6; }
+  /* variant cells for the new field types */
+  .rep-textarea { min-width: 140px; resize: vertical; }
+  .rep-bool-cell { text-align: center; }
+  .rep-bool { width: 18px; height: 18px; cursor: pointer; }
+  .rep-color-cell { white-space: nowrap; }
+  .rep-color { width: 34px; height: 28px; padding: 0; border: 1px solid var(--bd); border-radius: 6px; cursor: pointer; vertical-align: middle; }
+  .rep-color-text { width: 84px; display: inline-block; margin-inline-start: 4px; vertical-align: middle; }
+  .rep-file-pick { display: inline-flex; flex-direction: column; align-items: center; gap: 3px; }
+  .rep-file-name { font-size: 11px; color: #16a34a; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* Main media uploader preview */
   #addMediaPicked { width: 100%; }
@@ -544,6 +617,8 @@ include __DIR__ . '/inc/layout_head.php';
   window.VARIANT_SCHEMAS = <?= json_encode(function_exists('variant_schemas_list') ? variant_schemas_list() : [], JSON_UNESCAPED_UNICODE) ?>;
   // Enabled (API-backed) shipping carriers the admin can attach to a product.
   window.SHIPPING_CARRIERS = <?= json_encode(function_exists('enabled_shipping_carriers') ? enabled_shipping_carriers() : [], JSON_UNESCAPED_UNICODE) ?>;
+  // File-format catalogue for the inline variant builder (image & file columns).
+  window.VARIANT_FILE_FORMATS = <?= json_encode(function_exists('variant_file_formats_js') ? variant_file_formats_js() : [], JSON_UNESCAPED_UNICODE) ?>;
 </script>
 <script src="js/product.js?v=<?= @filemtime(__DIR__ . '/js/product.js') ?: time() ?>"></script>
 <script>

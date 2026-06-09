@@ -57,24 +57,46 @@ function buildRepeaterRow(fieldKey, idx, cols, row) {
         if (cv === undefined || cv === null) cv = '';
         var cName = 'attr[' + fieldKey + '][' + idx + '][' + c.key + ']';
 
-        if (c.type === 'image') {
-            // Per-variant image: file input (uploaded) + hidden keeps existing url.
-            // `media_variant[fieldKey][idx]` carries the uploaded file for this row.
-            var fName = 'media_variant[' + fieldKey + '][' + idx + ']';
-            // Stored variant images are relative to the project root (uploads/…);
-            // the panel lives in /panel/, so prefix ../ for display.
-            var thumbSrc = cv ? (/^https?:|^\//.test(cv) ? cv : '../' + cv) : '';
-            var thumb = cv
-                ? '<img src="' + escapeHtml(thumbSrc) + '" class="rep-img-thumb" alt="">'
-                : '<span class="rep-img-empty">بدون تصویر</span>';
+        if (c.type === 'image' || c.type === 'file') {
+            // Per-variant media (image OR generic file: pdf/doc/zip/…). A column
+            // may allow several uploads (images_count / files_count). Each slot
+            // gets its own file input named
+            //   media_variant[fieldKey][idx][colKey][slot]
+            // and a hidden field attr[...][slot] that keeps any existing url.
+            var isImg = (c.type === 'image');
+            var n = parseInt(isImg ? c.images_count : c.files_count, 10) || 1;
+            if (n < 1) n = 1;
+            var accept = variantFormatsToAccept(c.formats, isImg);
+            var existingVals = Array.isArray(cv) ? cv : (cv ? [cv] : []);
+            var slots = '';
+            for (var s = 0; s < n; s++) {
+                var sv = existingVals[s] || '';
+                var hName = 'attr[' + fieldKey + '][' + idx + '][' + c.key + '][' + s + ']';
+                var fName = 'media_variant[' + fieldKey + '][' + idx + '][' + c.key + '][' + s + ']';
+                var srcUrl = sv ? (/^https?:|^\//.test(sv) ? sv : '../' + sv) : '';
+                var preview;
+                if (isImg) {
+                    preview = sv
+                        ? '<img src="' + escapeHtml(srcUrl) + '" class="rep-img-thumb" alt="">'
+                        : '<span class="rep-img-empty">بدون تصویر</span>';
+                } else {
+                    preview = sv
+                        ? '<span class="rep-file-name" title="' + escapeHtml(sv) + '">📎 ' + escapeHtml(variantFileBase(sv)) + '</span>'
+                        : '<span class="rep-img-empty">بدون فایل</span>';
+                }
+                var btnLbl = isImg
+                    ? (n > 1 ? 'تصویر ' + (s + 1) : 'انتخاب تصویر')
+                    : (n > 1 ? 'فایل ' + (s + 1) : 'انتخاب فایل');
+                slots += '<label class="rep-img-pick' + (isImg ? '' : ' rep-file-pick') + '">' +
+                    preview +
+                    '<input type="hidden" name="' + hName + '" value="' + escapeHtml(sv) + '">' +
+                    '<input type="file" name="' + fName + '"' + (accept ? ' accept="' + accept + '"' : '') + ' ' +
+                    'onchange="repeaterImagePreview(this)" style="display:none">' +
+                    '<span class="rep-img-btn">' + btnLbl + '</span>' +
+                    '</label>';
+            }
             cells += '<td data-col="' + escapeHtml(c.label) + '" class="rep-img-cell">' +
-                '<input type="hidden" name="' + cName + '" value="' + escapeHtml(cv) + '">' +
-                '<label class="rep-img-pick">' +
-                thumb +
-                '<input type="file" name="' + fName + '" accept="image/*" ' +
-                'onchange="repeaterImagePreview(this)" style="display:none">' +
-                '<span class="rep-img-btn">انتخاب تصویر</span>' +
-                '</label></td>';
+                slots + '</td>';
             return;
         }
 
@@ -86,10 +108,46 @@ function buildRepeaterRow(fieldKey, idx, cols, row) {
             return;
         }
 
-        var cType = (c.type === 'number') ? 'number' : 'text';
-        var stepAttr = (c.type === 'number') ? ' step="any"' : '';
+        var ph = c.placeholder ? ' placeholder="' + escapeHtml(c.placeholder) + '"' : '';
+
+        // Long text.
+        if (c.type === 'textarea') {
+            cells += '<td data-col="' + escapeHtml(c.label) + '">' +
+                '<textarea name="' + cName + '" class="input rep-textarea" rows="2"' + ph + '>' +
+                escapeHtml(cv) + '</textarea></td>';
+            return;
+        }
+
+        // Yes/No toggle stored as 1/0.
+        if (c.type === 'bool') {
+            var checked = (cv === 1 || cv === '1' || cv === true || cv === 'on') ? ' checked' : '';
+            cells += '<td data-col="' + escapeHtml(c.label) + '" class="rep-bool-cell">' +
+                '<input type="hidden" name="' + cName + '" value="' + (checked ? '1' : '0') + '">' +
+                '<input type="checkbox" class="rep-bool"' + checked +
+                ' onchange="repeaterBoolToggle(this)"></td>';
+            return;
+        }
+
+        // Colour picker (keeps a text mirror so any hex/value is preserved).
+        if (c.type === 'color') {
+            var colVal = cv && /^#?[0-9a-fA-F]{3,8}$/.test(cv) ? (cv[0] === '#' ? cv : '#' + cv) : '#000000';
+            cells += '<td data-col="' + escapeHtml(c.label) + '" class="rep-color-cell">' +
+                '<input type="hidden" name="' + cName + '" value="' + escapeHtml(cv) + '">' +
+                '<input type="color" class="rep-color" value="' + escapeHtml(colVal) + '"' +
+                ' oninput="repeaterColorInput(this)">' +
+                '<input type="text" class="input rep-color-text"' + ph + ' value="' + escapeHtml(cv) + '"' +
+                ' oninput="repeaterColorText(this)"></td>';
+            return;
+        }
+
+        // number / url / date / text — a plain typed input with the matching type.
+        var cType = 'text';
+        var stepAttr = '';
+        if (c.type === 'number') { cType = 'number'; stepAttr = ' step="any"'; }
+        else if (c.type === 'url') { cType = 'url'; }
+        else if (c.type === 'date') { cType = 'date'; }
         cells += '<td data-col="' + escapeHtml(c.label) + '">' +
-            '<input type="' + cType + '"' + stepAttr +
+            '<input type="' + cType + '"' + stepAttr + ph +
             ' name="' + cName + '" class="input" value="' + escapeHtml(cv) + '"></td>';
     });
     cells += '<td class="rep-actions">' +
@@ -137,6 +195,82 @@ window.repeaterCustomInput = function (inp) {
     if (hidden) hidden.value = inp.value;
 };
 
+// Yes/No cell: mirror the checkbox state into the submitted hidden value.
+window.repeaterBoolToggle = function (cb) {
+    var td = cb.closest('td');
+    var hidden = td.querySelector('input[type=hidden]');
+    if (hidden) hidden.value = cb.checked ? '1' : '0';
+};
+
+// Colour cell: native picker → hidden + text mirror.
+window.repeaterColorInput = function (inp) {
+    var td = inp.closest('td');
+    var hidden = td.querySelector('input[type=hidden]');
+    var text = td.querySelector('.rep-color-text');
+    if (hidden) hidden.value = inp.value;
+    if (text) text.value = inp.value;
+};
+
+// Colour cell: free-text → hidden + (when a valid hex) the native picker.
+window.repeaterColorText = function (inp) {
+    var td = inp.closest('td');
+    var hidden = td.querySelector('input[type=hidden]');
+    var picker = td.querySelector('.rep-color');
+    if (hidden) hidden.value = inp.value;
+    if (picker && /^#?[0-9a-fA-F]{3,8}$/.test(inp.value)) {
+        picker.value = inp.value[0] === '#' ? inp.value : '#' + inp.value;
+    }
+};
+
+// The file-format catalogue, mirrored from PHP variant_file_formats() and
+// injected as window.VARIANT_FILE_FORMATS. Falls back to a small built-in list
+// so the builder still works even if the server didn't inject it.
+function variantFileFormats() {
+    if (window.VARIANT_FILE_FORMATS && typeof window.VARIANT_FILE_FORMATS === 'object') {
+        return window.VARIANT_FILE_FORMATS;
+    }
+    return {
+        jpg: { exts: ['jpg', 'jpeg'], label: 'JPG', kind: 'image' },
+        png: { exts: ['png'], label: 'PNG', kind: 'image' },
+        webp: { exts: ['webp'], label: 'WEBP', kind: 'image' },
+        gif: { exts: ['gif'], label: 'GIF', kind: 'image' },
+        pdf: { exts: ['pdf'], label: 'PDF', kind: 'file' },
+        doc: { exts: ['doc', 'docx'], label: 'Word', kind: 'file' },
+        xls: { exts: ['xls', 'xlsx'], label: 'Excel', kind: 'file' },
+        ppt: { exts: ['ppt', 'pptx'], label: 'PowerPoint', kind: 'file' },
+        txt: { exts: ['txt'], label: 'Text', kind: 'file' },
+        zip: { exts: ['zip'], label: 'ZIP', kind: 'file' },
+        rar: { exts: ['rar'], label: 'RAR', kind: 'file' },
+        mp4: { exts: ['mp4'], label: 'MP4 ویدیو', kind: 'file' },
+        mp3: { exts: ['mp3'], label: 'MP3 صوت', kind: 'file' }
+    };
+}
+
+// Build an HTML accept="" string from a list of format keys. For image columns
+// with no narrowing we accept any image; otherwise we map each format → its
+// extensions (".pdf,.doc,…").
+function variantFormatsToAccept(formats, isImage) {
+    var cat = variantFileFormats();
+    if (!Array.isArray(formats) || !formats.length) {
+        return isImage ? 'image/*' : '';
+    }
+    var parts = [];
+    formats.forEach(function (f) {
+        var def = cat[f];
+        if (def && Array.isArray(def.exts)) {
+            def.exts.forEach(function (e) { parts.push('.' + e); });
+        }
+    });
+    return parts.join(',');
+}
+
+// A short, friendly basename for a stored file url (drops the random prefix).
+function variantFileBase(url) {
+    var s = String(url || '');
+    var i = s.lastIndexOf('/');
+    return i >= 0 ? s.slice(i + 1) : s;
+}
+
 // Find a variant schema definition by id (from window.VARIANT_SCHEMAS).
 function findVariantSchema(id) {
     id = parseInt(id, 10);
@@ -174,13 +308,34 @@ function variantColumnsForSchema(id) {
     return cols;
 }
 
+// Append the universal stock / price-diff columns to a list of seller-built
+// custom columns (mirrors PHP variant_columns_with_builtins()).
+function variantColumnsWithBuiltins(customCols) {
+    var reserved = { stock: 1, price_diff: 1 };
+    var cols = [];
+    (customCols || []).forEach(function (c) {
+        if (c && c.key && reserved[c.key]) return;
+        cols.push(c);
+    });
+    cols.push({ key: 'stock', label: 'موجودی', type: 'number' });
+    cols.push({ key: 'price_diff', label: 'اختلاف قیمت (+/−)', type: 'number' });
+    return cols;
+}
+
 // Render a full repeater field (a labelled table + "add row" button).
-// For the variants table (def.dynamic_columns), columns are derived from the
-// currently-selected variant schema so they always match the product category.
-function buildRepeaterField(fieldKey, def, rows, schemaId) {
-    var cols = def.columns || [];
-    if (def.dynamic_columns) {
+// For the variants table (def.builder), the seller builds the columns INLINE
+// via "+ افزودن ویژگی" (each attribute = a column with a type & name); those
+// custom columns are kept in `customCols` and persisted as attr[_variant_cols].
+function buildRepeaterField(fieldKey, def, rows, schemaId, customCols) {
+    var cols;
+    if (def.builder) {
+        // Seller-defined columns + the universal stock/price-diff.
+        customCols = Array.isArray(customCols) ? customCols : [];
+        cols = variantColumnsWithBuiltins(customCols);
+    } else if (def.dynamic_columns) {
         cols = variantColumnsForSchema(schemaId || 0);
+    } else {
+        cols = def.columns || [];
     }
     rows = Array.isArray(rows) ? rows : [];
 
@@ -198,23 +353,148 @@ function buildRepeaterField(fieldKey, def, rows, schemaId) {
     }
 
     var colsJson = encodeURIComponent(JSON.stringify(cols));
-    var dynAttr = def.dynamic_columns ? ' data-dynamic="1"' : '';
+    var dynAttr = (def.dynamic_columns || def.builder) ? ' data-dynamic="1"' : '';
+    var builderAttr = def.builder ? ' data-builder="1"' : '';
+    var customJson = encodeURIComponent(JSON.stringify(customCols || []));
     var showWhen = def.show_when ? ' data-show-when="' + escapeHtml(def.show_when) + '"' : '';
     var html = '<div class="field rep-field" data-fieldkey="' + escapeHtml(fieldKey) +
-        '" data-cols="' + colsJson + '"' + dynAttr + showWhen + '>' +
+        '" data-cols="' + colsJson + '"' + dynAttr + builderAttr +
+        ' data-custom-cols="' + customJson + '"' + showWhen + '>' +
         '<label>' + escapeHtml(def.label) +
         // پس‌کد badge: when a (variants) repeater holds more than one row, the
         // product effectively has variants/post-codes and needs a photo per row.
-        (def.dynamic_columns ? ' <span class="rep-pscode-badge" style="display:none"></span>' : '') +
+        (def.dynamic_columns || def.builder ? ' <span class="rep-pscode-badge" style="display:none"></span>' : '') +
         '</label>';
     if (def.hint) {
         html += '<div class="field-hint">' + escapeHtml(def.hint) + '</div>';
     }
+
+    // Inline attribute builder bar: lists the seller's columns as removable
+    // chips + an "افزودن ویژگی" button that opens the type/name picker.
+    if (def.builder) {
+        // Hidden field that submits the column definitions with the product.
+        html += '<input type="hidden" class="rep-cols-input" name="attr[_variant_cols]" value="' +
+            escapeHtml(JSON.stringify(customCols || [])) + '">';
+        html += '<div class="vb-bar">';
+        (customCols || []).forEach(function (c, i) {
+            html += '<span class="vb-chip" data-idx="' + i + '">' +
+                '<span class="vb-chip-type">' + escapeHtml(variantTypeLabel(c.type)) + '</span>' +
+                escapeHtml(c.label) +
+                '<button type="button" class="vb-chip-x" title="حذف ویژگی" onclick="variantRemoveAttr(this)">×</button>' +
+                '</span>';
+        });
+        html += '<button type="button" class="btn btn-ghost vb-add" onclick="variantOpenAddAttr(this)">+ افزودن ویژگی</button>';
+        html += '</div>';
+        // Inline picker panel (hidden until "افزودن ویژگی" is clicked).
+        html += variantAttrPickerMarkup();
+    }
+
     html += '<div class="rep-wrap"><table class="rep-table"><thead><tr>' + head +
         '</tr></thead><tbody class="rep-body">' + body + '</tbody></table></div>' +
-        '<button type="button" class="btn btn-ghost rep-add" onclick="repeaterAddRow(this)">+ افزودن ردیف</button>' +
+        '<button type="button" class="btn btn-ghost rep-add" onclick="repeaterAddRow(this)">+ افزودن ردیف (تنوع)</button>' +
         '</div>';
     return html;
+}
+
+// Human label for a variant attribute type (used on chips).
+function variantTypeLabel(t) {
+    switch (t) {
+        case 'number': return 'عدد';
+        case 'textarea': return 'متن بلند';
+        case 'url': return 'لینک';
+        case 'date': return 'تاریخ';
+        case 'color': return 'رنگ';
+        case 'bool': return 'بله/خیر';
+        case 'select': return 'لیست';
+        case 'image': return 'تصویر';
+        case 'file': return 'فایل';
+        default: return 'متن';
+    }
+}
+
+// Build the checkbox grid for the file-format picker (شناخته‌شده‌ها). When
+// `imageOnly` is true only the image formats are offered (for an image column).
+function variantFormatCheckboxes(imageOnly, defaults) {
+    var cat = variantFileFormats();
+    defaults = defaults || {};
+    var html = '<div class="vb-formats">';
+    Object.keys(cat).forEach(function (k) {
+        var def = cat[k];
+        var isImg = (def.kind === 'image');
+        if (imageOnly && !isImg) return;
+        var checked = defaults[k] ? ' checked' : '';
+        html += '<label class="vb-fmt"><input type="checkbox" class="vb-fmt-cb" value="' +
+            escapeHtml(k) + '"' + checked + '> ' + escapeHtml(def.label) + '</label>';
+    });
+    html += '</div>';
+    return html;
+}
+
+// Markup for the inline "add attribute" picker panel:
+// type + name + placeholder + (per-type) options / image-count / file-formats.
+function variantAttrPickerMarkup() {
+    return '' +
+    '<div class="vb-picker" style="display:none">' +
+        '<div class="vb-picker-row">' +
+            '<label class="vb-lbl">نوع ویژگی</label>' +
+            '<select class="input vb-type" onchange="variantPickerTypeChange(this)">' +
+                '<optgroup label="نوشتاری">' +
+                    '<option value="text">متن کوتاه — مثل رنگ، جنس</option>' +
+                    '<option value="textarea">متن بلند — توضیح چند خطی</option>' +
+                    '<option value="number">عدد — مثل وزن، تعداد</option>' +
+                    '<option value="url">لینک (URL)</option>' +
+                    '<option value="date">تاریخ</option>' +
+                    '<option value="color">رنگ (انتخابگر رنگ)</option>' +
+                    '<option value="bool">بله/خیر (تیک)</option>' +
+                '</optgroup>' +
+                '<optgroup label="انتخابی">' +
+                    '<option value="select">لیست انتخابی + مقدار دلخواه</option>' +
+                '</optgroup>' +
+                '<optgroup label="فایل / رسانه">' +
+                    '<option value="image">تصویر — یک یا چند عکس</option>' +
+                    '<option value="file">فایل — PDF، Word، ZIP و…</option>' +
+                '</optgroup>' +
+            '</select>' +
+        '</div>' +
+        '<div class="vb-picker-row">' +
+            '<label class="vb-lbl">نام ویژگی</label>' +
+            '<input type="text" class="input vb-name" placeholder="مثلاً: رنگ، سایز، جنس، حجم…">' +
+        '</div>' +
+        '<div class="vb-picker-row vb-ph-row">' +
+            '<label class="vb-lbl">راهنمای داخل فیلد (اختیاری)</label>' +
+            '<input type="text" class="input vb-ph" placeholder="متن راهنما برای کاربر؛ مثلاً: کد رنگ را وارد کنید">' +
+        '</div>' +
+        '<div class="vb-picker-row vb-req-row">' +
+            '<label class="vb-chk"><input type="checkbox" class="vb-req"> پر کردن این فیلد الزامی است</label>' +
+        '</div>' +
+        '<div class="vb-picker-row vb-opts-row" style="display:none">' +
+            '<label class="vb-lbl">گزینه‌های لیست</label>' +
+            '<input type="text" class="input vb-opts" placeholder="گزینه‌ها را با ویرگول جدا کنید: آبی، قرمز، زرد">' +
+        '</div>' +
+        '<div class="vb-picker-row vb-allowcustom-row" style="display:none">' +
+            '<label class="vb-chk"><input type="checkbox" class="vb-allowcustom" checked> اجازهٔ وارد کردن مقدار دلخواه خارج از لیست</label>' +
+        '</div>' +
+        '<div class="vb-picker-row vb-imgcount-row" style="display:none">' +
+            '<label class="vb-lbl">تعداد تصویر برای هر تنوع</label>' +
+            '<input type="number" class="input vb-imgcount" min="1" max="10" value="1">' +
+        '</div>' +
+        '<div class="vb-picker-row vb-imgformats-row" style="display:none">' +
+            '<label class="vb-lbl">فرمت‌های مجاز تصویر</label>' +
+            variantFormatCheckboxes(true, { jpg: 1, png: 1, webp: 1, gif: 1 }) +
+        '</div>' +
+        '<div class="vb-picker-row vb-fileformats-row" style="display:none">' +
+            '<label class="vb-lbl">فرمت‌های مجاز فایل (یک یا چند مورد)</label>' +
+            variantFormatCheckboxes(false, { pdf: 1 }) +
+        '</div>' +
+        '<div class="vb-picker-row vb-filecount-row" style="display:none">' +
+            '<label class="vb-lbl">تعداد فایل برای هر تنوع</label>' +
+            '<input type="number" class="input vb-filecount" min="1" max="10" value="1">' +
+        '</div>' +
+        '<div class="vb-picker-actions">' +
+            '<button type="button" class="btn btn-primary vb-confirm" onclick="variantConfirmAddAttr(this)">افزودن</button>' +
+            '<button type="button" class="btn btn-ghost vb-cancel" onclick="variantCancelAddAttr(this)">انصراف</button>' +
+        '</div>' +
+    '</div>';
 }
 
 // Update the "پس‌کد" badge for a dynamic (variants) repeater: when there is
@@ -252,7 +532,17 @@ function repeaterCollectRows(field) {
         var row = {};
         tr.querySelectorAll('input,select,textarea').forEach(function (inp) {
             if (!inp.name) return;
-            // attr[fieldKey][idx][col]
+            // Skip the file inputs (they carry no preservable value).
+            if (inp.type === 'file') return;
+            // Multi-image hidden: attr[fieldKey][idx][col][slot]
+            var mi = inp.name.match(/^attr\[[^\]]+\]\[\d+\]\[([^\]]+)\]\[(\d+)\]$/);
+            if (mi) {
+                var ckey = mi[1], slot = parseInt(mi[2], 10);
+                if (!Array.isArray(row[ckey])) row[ckey] = [];
+                row[ckey][slot] = inp.value;
+                return;
+            }
+            // Scalar cell: attr[fieldKey][idx][col]
             var m = inp.name.match(/^attr\[[^\]]+\]\[\d+\]\[([^\]]+)\]$/);
             if (m) row[m[1]] = inp.value;
         });
@@ -283,6 +573,179 @@ window.onVariantSchemaChange = function (sel) {
         fresh.addEventListener('input', function () { updatePsCodeBadge(fresh); });
         fresh.addEventListener('change', function () { updatePsCodeBadge(fresh); });
     }
+};
+
+// ---------------------------------------------------------------------------
+// Inline variant ATTRIBUTE BUILDER
+// The seller defines the variant columns themselves (نوع + نام) right on the
+// product form, so every product can have exactly the fields it needs.
+// ---------------------------------------------------------------------------
+
+// Read the seller's current custom columns from a builder repeater field.
+function variantReadCustomCols(field) {
+    try {
+        return JSON.parse(decodeURIComponent(field.getAttribute('data-custom-cols') || '[]')) || [];
+    } catch (e) { return []; }
+}
+
+// Turn a label into a safe key (mirrors PHP variant_schema_slug, simplified).
+function variantSlug(s) {
+    s = String(s || '').trim().toLowerCase();
+    // Keep unicode letters/digits; everything else → underscore.
+    s = s.replace(/[^\p{L}\p{N}]+/gu, '_').replace(/^_+|_+$/g, '');
+    return s;
+}
+
+// Rebuild a builder repeater field after its columns changed, preserving rows.
+function variantRebuildField(field, newCustomCols) {
+    var which = field.closest('[id$="_attr"]');
+    which = which ? which.id.replace('_attr', '') : 'add';
+    var fieldKey = field.getAttribute('data-fieldkey');
+    var existing = repeaterCollectRows(field);
+    var label = (field.querySelector('label') || {}).childNodes
+        ? field.querySelector('label').childNodes[0].nodeValue.trim()
+        : 'تنوع محصول';
+    var hint = (field.querySelector('.field-hint') || {}).textContent || '';
+    var def = { label: label, dynamic_columns: true, builder: true, hint: hint,
+        show_when: field.getAttribute('data-show-when') || '' };
+    var html = buildRepeaterField(fieldKey, def, existing, 0, newCustomCols);
+    field.outerHTML = html;
+
+    var box = document.getElementById(which + '_attr');
+    var fresh = box ? box.querySelector('.rep-field[data-builder="1"]') : null;
+    if (fresh) {
+        updatePsCodeBadge(fresh);
+        fresh.addEventListener('input', function () { updatePsCodeBadge(fresh); });
+        fresh.addEventListener('change', function () { updatePsCodeBadge(fresh); });
+    }
+    return fresh;
+}
+
+// Open the inline "افزودن ویژگی" picker for this builder field.
+window.variantOpenAddAttr = function (btn) {
+    var field = btn.closest('.rep-field');
+    if (!field) return;
+    var picker = field.querySelector('.vb-picker');
+    if (!picker) return;
+    // reset inputs
+    picker.querySelector('.vb-type').value = 'text';
+    picker.querySelector('.vb-name').value = '';
+    var ph = picker.querySelector('.vb-ph'); if (ph) ph.value = '';
+    var req = picker.querySelector('.vb-req'); if (req) req.checked = false;
+    var opts = picker.querySelector('.vb-opts'); if (opts) opts.value = '';
+    var ac = picker.querySelector('.vb-allowcustom'); if (ac) ac.checked = true;
+    var ic = picker.querySelector('.vb-imgcount'); if (ic) ic.value = '1';
+    var fc = picker.querySelector('.vb-filecount'); if (fc) fc.value = '1';
+    // reset format checkboxes to defaults (image: jpg/png/webp/gif, file: pdf)
+    picker.querySelectorAll('.vb-imgformats-row .vb-fmt-cb').forEach(function (cb) {
+        cb.checked = (['jpg', 'png', 'webp', 'gif'].indexOf(cb.value) !== -1);
+    });
+    picker.querySelectorAll('.vb-fileformats-row .vb-fmt-cb').forEach(function (cb) {
+        cb.checked = (cb.value === 'pdf');
+    });
+    variantPickerTypeChange(picker.querySelector('.vb-type'));
+    picker.style.display = '';
+    picker.querySelector('.vb-name').focus();
+};
+
+// Toggle the conditional rows for the chosen type. Placeholder + required are
+// always available; options(+allow custom) for select; image count/formats for
+// image; file formats/count for file.
+window.variantPickerTypeChange = function (sel) {
+    var picker = sel.closest('.vb-picker');
+    if (!picker) return;
+    var t = sel.value;
+    var show = function (cls, on) {
+        var el = picker.querySelector(cls);
+        if (el) el.style.display = on ? '' : 'none';
+    };
+    show('.vb-opts-row', t === 'select');
+    show('.vb-allowcustom-row', t === 'select');
+    show('.vb-imgcount-row', t === 'image');
+    show('.vb-imgformats-row', t === 'image');
+    show('.vb-fileformats-row', t === 'file');
+    show('.vb-filecount-row', t === 'file');
+    // Placeholder makes sense for typed fields, not for bool/image/file.
+    show('.vb-ph-row', (t !== 'bool' && t !== 'image' && t !== 'file'));
+};
+
+// Cancel the picker without adding.
+window.variantCancelAddAttr = function (btn) {
+    var picker = btn.closest('.vb-picker');
+    if (picker) picker.style.display = 'none';
+};
+
+// Confirm: build a column def from the picker, append it, rebuild the table.
+window.variantConfirmAddAttr = function (btn) {
+    var field = btn.closest('.rep-field');
+    var picker = btn.closest('.vb-picker');
+    if (!field || !picker) return;
+    var type = picker.querySelector('.vb-type').value || 'text';
+    var label = (picker.querySelector('.vb-name').value || '').trim();
+    if (!label) { picker.querySelector('.vb-name').focus(); return; }
+
+    var cols = variantReadCustomCols(field);
+    // Build a unique key.
+    var base = variantSlug(label) || 'col';
+    var key = base, i = 2, used = {};
+    cols.forEach(function (c) { used[c.key] = 1; });
+    used['stock'] = 1; used['price_diff'] = 1;
+    while (used[key]) { key = base + i; i++; }
+
+    var col = { key: key, label: label, type: type };
+
+    // Placeholder (راهنما) — for typed fields only.
+    if (type !== 'bool' && type !== 'image' && type !== 'file') {
+        var phEl = picker.querySelector('.vb-ph');
+        var phVal = phEl ? (phEl.value || '').trim() : '';
+        if (phVal) col.placeholder = phVal.slice(0, 120);
+    }
+    // Required flag.
+    var reqEl = picker.querySelector('.vb-req');
+    if (reqEl && reqEl.checked) col.required = 1;
+
+    if (type === 'select') {
+        var raw = (picker.querySelector('.vb-opts').value || '').split(/[\n,]+/);
+        var opts = [];
+        raw.forEach(function (o) { o = o.trim(); if (o && opts.indexOf(o) === -1) opts.push(o); });
+        col.options = opts;
+        var acEl = picker.querySelector('.vb-allowcustom');
+        col.allow_custom = (acEl && acEl.checked) ? 1 : 0;
+    }
+    if (type === 'image') {
+        var n = parseInt(picker.querySelector('.vb-imgcount').value, 10) || 1;
+        if (n < 1) n = 1; if (n > 10) n = 10;
+        col.images_count = n;
+        var imgFmts = [];
+        picker.querySelectorAll('.vb-imgformats-row .vb-fmt-cb').forEach(function (cb) {
+            if (cb.checked) imgFmts.push(cb.value);
+        });
+        col.formats = imgFmts.length ? imgFmts : ['jpg', 'png', 'webp', 'gif'];
+    }
+    if (type === 'file') {
+        var fileFmts = [];
+        picker.querySelectorAll('.vb-fileformats-row .vb-fmt-cb').forEach(function (cb) {
+            if (cb.checked) fileFmts.push(cb.value);
+        });
+        if (!fileFmts.length) { alert('حداقل یک فرمت فایل را انتخاب کنید.'); return; }
+        col.formats = fileFmts;
+        var fn = parseInt(picker.querySelector('.vb-filecount').value, 10) || 1;
+        if (fn < 1) fn = 1; if (fn > 10) fn = 10;
+        col.files_count = fn;
+    }
+    cols.push(col);
+    variantRebuildField(field, cols);
+};
+
+// Remove a custom attribute (chip ×) and rebuild the table.
+window.variantRemoveAttr = function (btn) {
+    var chip = btn.closest('.vb-chip');
+    var field = btn.closest('.rep-field');
+    if (!chip || !field) return;
+    var idx = parseInt(chip.getAttribute('data-idx'), 10);
+    var cols = variantReadCustomCols(field);
+    if (idx >= 0 && idx < cols.length) cols.splice(idx, 1);
+    variantRebuildField(field, cols);
 };
 
 // Re-index all row inputs of a repeater after add/remove so names stay sequential.
@@ -412,6 +875,16 @@ window.renderAttrFields = function (which, values) {
 
     // The currently-chosen variant schema id (drives the variants columns).
     var schemaId = parseInt(values['_variant_schema'] || 0, 10) || 0;
+    // Per-product custom variant columns the seller built inline (_variant_cols).
+    var customCols = [];
+    if (values['_variant_cols']) {
+        try {
+            customCols = (typeof values['_variant_cols'] === 'string')
+                ? JSON.parse(values['_variant_cols'])
+                : values['_variant_cols'];
+        } catch (e) { customCols = []; }
+    }
+    if (!Array.isArray(customCols)) customCols = [];
 
     def.fields.forEach(function (f) {
         var val = values[f.key];
@@ -425,7 +898,7 @@ window.renderAttrFields = function (which, values) {
 
         // Repeater is self-contained (own table markup) — render & return.
         if (f.type === 'repeater') {
-            box.insertAdjacentHTML('beforeend', buildRepeaterField(f.key, f, val, schemaId));
+            box.insertAdjacentHTML('beforeend', buildRepeaterField(f.key, f, val, schemaId, customCols));
             return;
         }
 
