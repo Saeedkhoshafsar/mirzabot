@@ -444,12 +444,15 @@ window.renderAttrFields = function (which, values) {
             html += '<textarea name="' + name + '" class="textarea">' + escapeHtml(val) + '</textarea>';
         } else if (f.type === 'bool') {
             var checked = (val === '1' || val === 1 || val === true || val === 'on') ? 'checked' : '';
-            // hidden 0 so unchecked still submits a value
-            html += '<input type="hidden" name="' + name + '" value="0">';
+            // hidden 0 so unchecked still submits a value. The checkbox lives
+            // INSIDE the <label>, so it has no previousElementSibling — use the
+            // shared onBoolToggle() helper to find the hidden mirror by name
+            // and (crucially) re-run applyShowWhen() so gated fields appear.
+            html += '<input type="hidden" name="' + name + '" value="' + (checked ? '1' : '0') + '">';
             html += '<label style="display:flex;align-items:center;gap:8px;font-weight:400">' +
                 '<input type="checkbox" value="1" ' + checked +
                 ' data-bool-key="' + escapeHtml(f.key) + '"' +
-                ' onchange="this.previousElementSibling.value=this.checked?1:0;applyShowWhen(this.closest(\'.modal-body\')||document)"> بله</label>';
+                ' onchange="onBoolToggle(this)"> بله</label>';
         } else if (f.type === 'select') {
             html += '<select name="' + name + '" class="select">';
             var opts = f.options || {};
@@ -516,6 +519,25 @@ function buildCarriersField(f, val) {
     html += '</div>';
     return html;
 }
+
+// Handle a bool checkbox toggle: mirror its state into the hidden input that
+// carries the value on submit (the checkbox sits INSIDE the <label>, so it has
+// no previousElementSibling), then re-run applyShowWhen() so any gated fields
+// (variant schema picker + variants table) show/hide immediately.
+window.onBoolToggle = function (cb) {
+    var key = cb.getAttribute('data-bool-key');
+    // Scope to the enclosing field group / modal so we update the right inputs.
+    var scope = cb.closest('.modal-body') || cb.closest('.field') || document;
+    // The hidden mirror is a sibling of the <label> within the same field block,
+    // matched by its name attr[<key>] (robust regardless of DOM nesting).
+    var field = cb.closest('.field') || scope;
+    var hidden = field.querySelector('input[type=hidden][name="attr[' + key + ']"]');
+    if (!hidden) {
+        hidden = scope.querySelector('input[type=hidden][name="attr[' + key + ']"]');
+    }
+    if (hidden) hidden.value = cb.checked ? 1 : 0;
+    applyShowWhen(cb.closest('.modal-body') || document);
+};
 
 // Show/hide any [data-show-when="boolKey"] block based on its gating checkbox,
 // and disable inputs inside hidden blocks so they don't submit stale values.
