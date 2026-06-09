@@ -1837,6 +1837,148 @@ function set_store_terminology(array $terms, $bot_id = 0)
     }
 }
 
+// ===========================================================================
+// Pure-PHP database dump (mysqldump-free fallback).
+//
+// Why this exists: the server here is MySQL 8.4 while the installed dump
+// client is MariaDB's mysqldump. That mix frequently aborts mid-stream with
+// exit code 7 (MariaDB EX_CONSCHECK / "Couldn't read data" while it streams a
+// table that uses an 8.0-only collation such as utf8mb4_0900_ai_ci). When that
+// happens mysqldump writes a partial/empty file and the nightly backup fails.
+//
+// This function reproduces a mysqldump-compatible .sql file using nothing but
+// the PDO connection the bot already has, so it works no matter which client
+// binary (or none) is installed and never trips the version mismatch. It is
+// used automatically as a fallback when mysqldump fails.
+//
+// Returns true on success (file written, non-empty), false otherwise. On
+// failure it sets $errOut (by reference) to a human-readable reason.
+// ===========================================================================
+function php_database_dump($outFile, &$errOut = null)
+{
+    global $pdo, $dbname;
+    $errOut = '';
+    if (!isset($pdo)) {
+        $errOut = 'اتصال PDO به دیتابیس در دسترس نیست (config.php را بررسی کنید).';
+        return false;
+    }
+
+    $fh = @fopen($outFile, 'wb');
+    if ($fh === false) {
+        $errOut = 'امکان ساخت فایل خروجی نبود (مجوز نوشتن یا فضای دیسک را بررسی کنید).';
+        return false;
+    }
+
+    try {
+        // Header mirrors mysqldump so the file restores the same way.
+        fwrite($fh, "-- PHP fallback dump (mysqldump unavailable / failed)\n");
+        fwrite($fh, "-- Database: " . (string) $dbname . "\n");
+        fwrite($fh, "-- Generated: " . date('Y-m-d H:i:s') . "\n\n");
+        fwrite($fh, "/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;\n");
+        fwrite($fh, "/*!40101 SET NAMES utf8mb4 */;\n");
+        fwrite($fh, "/*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;\n");
+        fwrite($fh, "/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;\n\n");
+
+        // Enumerate base tables (skip views; we add them after).
+        $tables = [];
+        $views = [];
+        $rows = $pdo->query("SHOW FULL TABLES")->fetchAll(PDO::FETCH_NUM);
+        foreach ($rows as $r) {
+            $name = $r[0];
+            $type = isset($r[1]) ? strtoupper((string) $r[1]) : 'BASE TABLE';
+            if (strpos($type, 'VIEW') !== false) {
+                $views[] = $name;
+            } else {
+                $tables[] = $name;
+            }
+        }
+
+        foreach ($tables as $table) {
+            $q = '`' . str_replace('`', '``', $table) . '`';
+
+            // Structure.
+            fwrite($fh, "\n--\n-- Table structure for table $q\n--\n\n");
+            fwrite($fh, "DROP TABLE IF EXISTS $q;\n");
+            $create = $pdo->query("SHOW CREATE TABLE $q")->fetch(PDO::FETCH_NUM);
+            if (isset($create[1])) {
+                fwrite($fh, $create[1] . ";\n\n");
+            }
+
+            // Data — stream row by row to keep memory flat on huge tables.
+            fwrite($fh, "--\n-- Dumping data for table $q\n--\n\n");
+            $stmt = $pdo->query("SELECT * FROM $q");
+            $colCount = $stmt->columnCount();
+            $batch = [];
+            $batchLen = 0;
+            $flush = function () use (&$batch, &$batchLen, $fh, $q) {
+                if (empty($batch)) {
+                    return;
+                }
+                fwrite($fh, "INSERT INTO $q VALUES\n" . implode(",\n", $batch) . ";\n");
+                $batch = [];
+                $batchLen = 0;
+            };
+            while ($row = $stmt->fetch(PDO::FETCH_NUM)) {
+                $vals = [];
+                for ($i = 0; $i < $colCount; $i++) {
+                    $v = $row[$i];
+                    if ($v === null) {
+                        $vals[] = 'NULL';
+                    } elseif (is_int($v) || is_float($v)) {
+                        $vals[] = (string) $v;
+                    } else {
+                        $vals[] = $pdo->quote((string) $v);
+                    }
+                }
+                $tuple = '(' . implode(',', $vals) . ')';
+                $batch[] = $tuple;
+                $batchLen += strlen($tuple);
+                // Cap each multi-row INSERT near ~512KB to stay restore-friendly.
+                if ($batchLen >= 512000) {
+                    $flush();
+                }
+            }
+            $flush();
+            fwrite($fh, "\n");
+        }
+
+        // Views last (their tables must already exist). Use DROP VIEW (not
+        // DROP TABLE) and strip the DEFINER clause so the dump restores on any
+        // host even if that MySQL user doesn't exist there.
+        foreach ($views as $view) {
+            $q = '`' . str_replace('`', '``', $view) . '`';
+            fwrite($fh, "\n--\n-- View structure for view $q\n--\n\n");
+            fwrite($fh, "DROP VIEW IF EXISTS $q;\n");
+            $create = $pdo->query("SHOW CREATE VIEW $q")->fetch(PDO::FETCH_NUM);
+            // SHOW CREATE VIEW returns the statement in column index 1.
+            if (isset($create[1])) {
+                $stmt = (string) $create[1];
+                // Remove "DEFINER=`user`@`host` " so the view isn't tied to a
+                // specific account on restore (mysqldump does the same with
+                // --skip-definer-style portability).
+                $stmt = preg_replace('/DEFINER=`[^`]*`@`[^`]*`\s*/', '', $stmt);
+                // Likewise drop "SQL SECURITY DEFINER" → leave engine default.
+                $stmt = preg_replace('/SQL SECURITY DEFINER\s*/', '', $stmt);
+                fwrite($fh, $stmt . ";\n\n");
+            }
+        }
+
+        fwrite($fh, "\n/*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;\n");
+        fwrite($fh, "/*!40101 SET SQL_MODE=@OLD_SQL_MODE */;\n");
+        fclose($fh);
+    } catch (Exception $e) {
+        @fclose($fh);
+        $errOut = 'خطای PDO هنگام دامپ: ' . $e->getMessage();
+        return false;
+    }
+
+    if (!@file_exists($outFile) || @filesize($outFile) <= 0) {
+        $errOut = 'فایل دامپ ساخته شد ولی خالی بود.';
+        return false;
+    }
+    return true;
+}
+
 /**
  * Registry of supported product types (generic e-commerce model).
  * Each type declares a label and the attribute fields it uses.
@@ -1865,15 +2007,28 @@ function product_types()
                 ['key' => 'stock',         'label' => 'موجودی کل (اگر واریانت ندارد)', 'type' => 'number', 'hint' => 'اگر از واریانت‌ها استفاده می‌کنید، خالی بگذارید'],
                 ['key' => 'weight',        'label' => 'وزن (گرم)', 'type' => 'number', 'hint' => 'برای محاسبهٔ هزینهٔ ارسال'],
                 ['key' => 'needs_address', 'label' => 'نیاز به آدرس پستی', 'type' => 'bool', 'hint' => 'دریافت آدرس هنگام خرید'],
-                // Variants: each color/size combination has its own stock & price diff.
+
+                // Variant schema picker (custom, category-like template). Lets
+                // the merchant choose which custom columns the variants table
+                // shows for THIS product: clothing → رنگ/سایز/جنس/پس‌کد,
+                // cosmetics → حجم/شِید, home appliance → ولتاژ/گارانتی, … When
+                // left on "پیش‌فرض" the legacy رنگ/سایز/SKU columns are used.
+                ['key' => '_variant_schema', 'label' => 'قالب تنوع (ستون‌های دلخواه)', 'type' => 'variant_schema',
+                 'hint' => 'برای هر دستهٔ کالا (لباس، آرایشی، لوازم خانگی…) می‌توانید در «مدیریت قالب‌های تنوع» ستون‌های دلخواه بسازید و اینجا انتخاب کنید. ستون‌های موجودی/اختلاف قیمت/تصویر همیشه به‌صورت خودکار اضافه می‌شوند.'],
+
+                // Variants: columns are rendered dynamically from the chosen
+                // schema (see _variant_schema). The list below is only the
+                // default fallback when no schema is selected.
                 ['key' => 'variants', 'label' => 'تنوع محصول (رنگ/سایز)', 'type' => 'repeater',
-                 'hint' => 'برای هر رنگ/سایز یک ردیف بسازید؛ موجودی و قیمت هرکدام مستقل است.',
+                 'dynamic_columns' => true, // columns come from the selected schema (JS)
+                 'hint' => 'برای هر تنوع یک ردیف بسازید؛ موجودی و قیمت هرکدام مستقل است. در ستون‌های لیستی می‌توانید از مقادیر آماده انتخاب کنید یا «مقدار دلخواه…» را بزنید و دستی وارد کنید.',
                  'columns' => [
                     ['key' => 'color',      'label' => 'رنگ',           'type' => 'text'],
                     ['key' => 'size',       'label' => 'سایز',          'type' => 'text'],
                     ['key' => 'sku',        'label' => 'کد (SKU)',       'type' => 'text'],
                     ['key' => 'stock',      'label' => 'موجودی',         'type' => 'number'],
                     ['key' => 'price_diff', 'label' => 'اختلاف قیمت (+/−)', 'type' => 'number'],
+                    ['key' => 'image',      'label' => 'تصویر این تنوع',   'type' => 'image'],
                  ],
                 ],
                 // Shipping methods: post / tipax / courier / pickup, each with cost & ETA.
@@ -1926,6 +2081,32 @@ function is_valid_product_type($type)
  * Decode the attributes JSON of a product row into an array (safe).
  * Accepts either a full product row (array) or a raw JSON string.
  */
+/**
+ * Parse a money value that may contain thousands separators or other
+ * formatting (e.g. "1,200,000" or "۱٬۲۰۰٬۰۰۰") into a plain integer.
+ * Keeps a leading minus sign so price-difference values can be negative.
+ */
+function money_int($value)
+{
+    if (is_int($value)) {
+        return $value;
+    }
+    $s = (string) $value;
+    // Normalise Persian/Arabic digits to ASCII.
+    $fa = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
+    $ar = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
+    $en = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+    $s = str_replace($fa, $en, $s);
+    $s = str_replace($ar, $en, $s);
+    $neg = (strpos($s, '-') !== false);
+    $s = preg_replace('/[^\d]/', '', $s);
+    if ($s === '') {
+        return 0;
+    }
+    $n = (int) $s;
+    return $neg ? -$n : $n;
+}
+
 function product_attributes($productOrJson)
 {
     $raw = is_array($productOrJson) ? ($productOrJson['attributes'] ?? null) : $productOrJson;
@@ -1962,8 +2143,29 @@ function set_product_type($product_id, $type, array $attributes = [])
     foreach ($types[$type]['fields'] as $f) {
         $fieldDefs[$f['key']] = $f;
     }
+
+    // Resolve the chosen variant schema (if any) up front, so the variants
+    // repeater can accept the schema's custom columns instead of only the
+    // fixed fallback columns declared in product_types().
+    $variantSchemaId = 0;
+    if (isset($attributes['_variant_schema'])) {
+        $variantSchemaId = (int) $attributes['_variant_schema'];
+    }
+    // Persist the picked schema id (0/empty = default columns).
+    if ($variantSchemaId > 0 && function_exists('variant_schema_get') && variant_schema_get($variantSchemaId)) {
+        // keep it
+    } else {
+        $variantSchemaId = 0;
+    }
+
     $clean = [];
+    if ($variantSchemaId > 0) {
+        $clean['_variant_schema'] = $variantSchemaId;
+    }
     foreach ($attributes as $k => $v) {
+        if ($k === '_variant_schema') {
+            continue; // handled above
+        }
         if (!isset($fieldDefs[$k])) {
             continue; // unknown field for this type → drop
         }
@@ -1975,8 +2177,15 @@ function set_product_type($product_id, $type, array $attributes = [])
             if (!is_array($v)) {
                 continue;
             }
+            // For the variants repeater, the allowed columns come from the
+            // selected variant schema (custom, per-category fields) rather
+            // than the static fallback declared above.
+            $cols = $def['columns'] ?? [];
+            if (!empty($def['dynamic_columns']) && function_exists('variant_schema_columns')) {
+                $cols = variant_schema_columns($variantSchemaId);
+            }
             $colKeys = [];
-            foreach (($def['columns'] ?? []) as $c) {
+            foreach ($cols as $c) {
                 $colKeys[$c['key']] = true;
             }
             $rows = [];
@@ -2137,6 +2346,418 @@ function product_media_detect($tmpPath, $originalName = '')
         return $allowed[$mime];
     }
     return null;
+}
+
+// ===========================================================================
+// Per-variant image uploads.
+//
+// A multi-variant product (e.g. a shirt in red/blue/yellow) needs a SEPARATE
+// photo per variant so the buyer sees the exact colour they pick. The product
+// form posts these as media_variant[<fieldKey>][<rowIdx>] file inputs. After
+// the variants JSON is saved we attach each uploaded image's URL to its row's
+// `image` cell (matched by the same rowIdx).
+// ===========================================================================
+
+/**
+ * Save a single uploaded variant image (one $_FILES slot) and return its
+ * relative URL (e.g. "uploads/products/variants/12_ab.jpg"), or null on
+ * failure. Only images are accepted.
+ */
+function product_variant_image_save($pid, $tmp, $origName, $size, $error)
+{
+    if ($error !== UPLOAD_ERR_OK || !is_uploaded_file($tmp)) {
+        // Allow non-uploaded paths only in CLI tests; in web context require upload.
+        if (!(PHP_SAPI === 'cli' && is_file($tmp))) {
+            return null;
+        }
+    }
+    if ($size <= 0 || $size > 25 * 1024 * 1024) {
+        return null; // empty or > 25MB
+    }
+    $detected = product_media_detect($tmp, $origName);
+    if (!$detected || $detected[0] !== 'image') {
+        return null; // variants only accept images
+    }
+    $ext = $detected[1];
+
+    $dirAbs = __DIR__ . '/uploads/products/variants';
+    $relPrefix = 'uploads/products/variants';
+    if (!is_dir($dirAbs)) {
+        @mkdir($dirAbs, 0755, true);
+    }
+    $fname = ((int) $pid) . '_' . bin2hex(random_bytes(6)) . '.' . $ext;
+    $absPath = $dirAbs . '/' . $fname;
+
+    $moved = @move_uploaded_file($tmp, $absPath);
+    if (!$moved) {
+        // CLI/test fallback (move_uploaded_file refuses non-HTTP uploads).
+        $moved = @copy($tmp, $absPath);
+    }
+    if (!$moved) {
+        return null;
+    }
+    return $relPrefix . '/' . $fname;
+}
+
+/**
+ * After set_product_type(), merge any uploaded per-variant images into the
+ * product's stored attributes. $variantFiles is the normalised
+ * $_FILES['media_variant'] array (shape: [fieldKey][idx] => file fields).
+ * Returns true if the attributes were updated.
+ */
+function product_apply_variant_images($pid, $variantFiles)
+{
+    global $pdo;
+    $pid = (int) $pid;
+    if ($pid <= 0 || !is_array($variantFiles) || !isset($pdo)) {
+        return false;
+    }
+
+    // Load current attributes.
+    try {
+        $stmt = $pdo->prepare("SELECT attributes FROM product WHERE id = ? LIMIT 1");
+        $stmt->execute([$pid]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    } catch (Exception $e) {
+        error_log("product_apply_variant_images load error: " . $e->getMessage());
+        return false;
+    }
+    if (!$row) {
+        return false;
+    }
+    $attrs = product_attributes($row['attributes'] ?? null);
+    $changed = false;
+
+    foreach ($variantFiles as $fieldKey => $rows) {
+        // PHP nests multi-file inputs as parallel arrays keyed by sub-fields:
+        //   media_variant[fieldKey] => name[idx], tmp_name[idx], size[idx], error[idx]
+        if (!is_array($rows) || !isset($rows['tmp_name']) || !is_array($rows['tmp_name'])) {
+            continue;
+        }
+        if (!isset($attrs[$fieldKey]) || !is_array($attrs[$fieldKey])) {
+            continue; // no saved rows for this repeater
+        }
+        $names = $rows['name'] ?? [];
+        $tmps  = $rows['tmp_name'];
+        $sizes = $rows['size'] ?? [];
+        $errs  = $rows['error'] ?? [];
+
+        foreach ($tmps as $idx => $tmp) {
+            if ($tmp === '' || $tmp === null) {
+                continue;
+            }
+            $nm = $names[$idx] ?? '';
+            $url = product_variant_image_save($pid, $tmp, $nm, $sizes[$idx] ?? 0, $errs[$idx] ?? 0);
+            if ($url === null) {
+                continue;
+            }
+            // Attach to the matching variant row (same index). Rows may have
+            // been re-indexed on save, so match positionally.
+            $rowKeys = array_keys($attrs[$fieldKey]);
+            if (isset($rowKeys[$idx])) {
+                $realKey = $rowKeys[$idx];
+                if (is_array($attrs[$fieldKey][$realKey])) {
+                    $attrs[$fieldKey][$realKey]['image'] = $url;
+                    $changed = true;
+                }
+            }
+        }
+    }
+
+    if (!$changed) {
+        return false;
+    }
+    try {
+        $json = json_encode($attrs, JSON_UNESCAPED_UNICODE);
+        $up = $pdo->prepare("UPDATE product SET attributes = ? WHERE id = ?");
+        return $up->execute([$json, $pid]);
+    } catch (Exception $e) {
+        error_log("product_apply_variant_images save error: " . $e->getMessage());
+        return false;
+    }
+}
+
+// ===========================================================================
+// Variant schemas (custom, category-like variant templates).
+//
+// Why: a clothing product needs size/color/material/پس‌کد, a cosmetics product
+// needs volume/shade, a home appliance needs voltage/warranty — there is no
+// single fixed variant shape that fits everything. So the merchant defines
+// reusable "variant schemas" (like categories) and, on each product, picks one.
+// Each schema is a named set of custom columns; every column can be:
+//   * a free text/number cell, OR
+//   * a dropdown (select) backed by a predefined value list, optionally with
+//     "allow_custom" so the seller can still type a one-off value.
+//
+// Storage: table `variant_schema` (id, name, fields JSON, created_at).
+// A `fields` entry looks like:
+//   { "key":"color", "label":"رنگ", "type":"select",
+//     "options":["قرمز","آبی"], "allow_custom":1 }
+// type ∈ text | number | select | image
+//
+// On a product, the chosen schema id is stored in attributes._variant_schema
+// and the rows themselves stay in the existing `variants` repeater, so nothing
+// about checkout/stock/price-diff handling changes.
+// ===========================================================================
+
+/** Create the variant_schema table on demand (safe to call repeatedly). */
+function ensure_variant_schema_table()
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return false;
+    }
+    static $done = false;
+    if ($done) {
+        return true;
+    }
+    try {
+        $pdo->exec(
+            "CREATE TABLE IF NOT EXISTS variant_schema (
+                id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                name VARCHAR(200) NOT NULL,
+                fields MEDIUMTEXT NULL,
+                created_at DATETIME NULL,
+                PRIMARY KEY (id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        );
+        $done = true;
+        return true;
+    } catch (Exception $e) {
+        error_log("ensure_variant_schema_table error: " . $e->getMessage());
+        return false;
+    }
+}
+
+/**
+ * Normalise a raw fields definition (array of column defs) into a clean,
+ * safe structure. Drops malformed entries, dedups keys, and validates type.
+ */
+function variant_schema_normalize_fields($fields)
+{
+    if (is_string($fields)) {
+        $fields = json_decode($fields, true);
+    }
+    if (!is_array($fields)) {
+        return [];
+    }
+    $allowedTypes = ['text', 'number', 'select', 'image'];
+    $out = [];
+    $seen = [];
+    foreach ($fields as $f) {
+        if (!is_array($f)) {
+            continue;
+        }
+        $label = isset($f['label']) ? trim((string) $f['label']) : '';
+        if ($label === '') {
+            continue;
+        }
+        // Derive a stable key from the explicit key or the label.
+        $key = isset($f['key']) ? trim((string) $f['key']) : '';
+        if ($key === '') {
+            $key = variant_schema_slug($label);
+        } else {
+            $key = variant_schema_slug($key);
+        }
+        if ($key === '' || isset($seen[$key])) {
+            // Ensure uniqueness even when labels collide.
+            $key = $key === '' ? 'col' : $key;
+            $i = 2;
+            $base = $key;
+            while (isset($seen[$key])) {
+                $key = $base . $i;
+                $i++;
+            }
+        }
+        $seen[$key] = true;
+
+        $type = isset($f['type']) ? (string) $f['type'] : 'text';
+        if (!in_array($type, $allowedTypes, true)) {
+            $type = 'text';
+        }
+
+        $col = ['key' => $key, 'label' => $label, 'type' => $type];
+
+        if ($type === 'select') {
+            $opts = [];
+            $raw = $f['options'] ?? [];
+            if (is_string($raw)) {
+                // Accept newline- or comma-separated option text.
+                $raw = preg_split('/[\r\n,]+/', $raw);
+            }
+            if (is_array($raw)) {
+                foreach ($raw as $o) {
+                    $o = trim((string) $o);
+                    if ($o !== '' && !in_array($o, $opts, true)) {
+                        $opts[] = $o;
+                    }
+                }
+            }
+            $col['options'] = $opts;
+            // allow_custom lets the seller type a value not in the list.
+            $ac = $f['allow_custom'] ?? 1;
+            $col['allow_custom'] = ($ac === 1 || $ac === '1' || $ac === true || $ac === 'on') ? 1 : 0;
+        }
+
+        $out[] = $col;
+    }
+    return $out;
+}
+
+/** Turn a label into a safe ascii/utf8 attribute key (letters, digits, _). */
+function variant_schema_slug($s)
+{
+    $s = trim((string) $s);
+    // Keep unicode letters/digits, turn everything else into underscores.
+    $s = preg_replace('/[^\p{L}\p{N}]+/u', '_', $s);
+    $s = trim($s, '_');
+    if (function_exists('mb_strtolower')) {
+        $s = mb_strtolower($s, 'UTF-8');
+    } else {
+        $s = strtolower($s);
+    }
+    return $s;
+}
+
+/** List all variant schemas (id, name, fields[]), newest first. */
+function variant_schemas_list()
+{
+    global $pdo;
+    if (!isset($pdo) || !ensure_variant_schema_table()) {
+        return [];
+    }
+    try {
+        $rows = $pdo->query("SELECT id, name, fields, created_at FROM variant_schema ORDER BY id DESC")
+            ->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($rows as &$r) {
+            $r['fields'] = variant_schema_normalize_fields($r['fields'] ?? '[]');
+        }
+        unset($r);
+        return $rows ?: [];
+    } catch (Exception $e) {
+        error_log("variant_schemas_list error: " . $e->getMessage());
+        return [];
+    }
+}
+
+/** Fetch one schema by id (with normalised fields[]), or null. */
+function variant_schema_get($id)
+{
+    global $pdo;
+    $id = (int) $id;
+    if ($id <= 0 || !isset($pdo) || !ensure_variant_schema_table()) {
+        return null;
+    }
+    try {
+        $stmt = $pdo->prepare("SELECT id, name, fields, created_at FROM variant_schema WHERE id = ? LIMIT 1");
+        $stmt->execute([$id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$row) {
+            return null;
+        }
+        $row['fields'] = variant_schema_normalize_fields($row['fields'] ?? '[]');
+        return $row;
+    } catch (Exception $e) {
+        error_log("variant_schema_get error: " . $e->getMessage());
+        return null;
+    }
+}
+
+/** Create a new variant schema. Returns new id or false. */
+function variant_schema_add($name, $fields)
+{
+    global $pdo;
+    if (!isset($pdo) || !ensure_variant_schema_table()) {
+        return false;
+    }
+    $name = trim((string) $name);
+    if ($name === '') {
+        return false;
+    }
+    $clean = variant_schema_normalize_fields($fields);
+    try {
+        $stmt = $pdo->prepare("INSERT INTO variant_schema (name, fields, created_at) VALUES (?, ?, NOW())");
+        $stmt->execute([$name, json_encode($clean, JSON_UNESCAPED_UNICODE)]);
+        return (int) $pdo->lastInsertId();
+    } catch (Exception $e) {
+        error_log("variant_schema_add error: " . $e->getMessage());
+        return false;
+    }
+}
+
+/** Update an existing variant schema. */
+function variant_schema_update($id, $name, $fields)
+{
+    global $pdo;
+    $id = (int) $id;
+    if ($id <= 0 || !isset($pdo) || !ensure_variant_schema_table()) {
+        return false;
+    }
+    $name = trim((string) $name);
+    if ($name === '') {
+        return false;
+    }
+    $clean = variant_schema_normalize_fields($fields);
+    try {
+        $stmt = $pdo->prepare("UPDATE variant_schema SET name = ?, fields = ? WHERE id = ?");
+        return $stmt->execute([$name, json_encode($clean, JSON_UNESCAPED_UNICODE), $id]);
+    } catch (Exception $e) {
+        error_log("variant_schema_update error: " . $e->getMessage());
+        return false;
+    }
+}
+
+/** Delete a variant schema by id. */
+function variant_schema_delete($id)
+{
+    global $pdo;
+    $id = (int) $id;
+    if ($id <= 0 || !isset($pdo) || !ensure_variant_schema_table()) {
+        return false;
+    }
+    try {
+        $stmt = $pdo->prepare("DELETE FROM variant_schema WHERE id = ?");
+        return $stmt->execute([$id]);
+    } catch (Exception $e) {
+        error_log("variant_schema_delete error: " . $e->getMessage());
+        return false;
+    }
+}
+
+/**
+ * Build the repeater "columns" definition for a given variant schema id,
+ * ready to be merged into the product form's variants table. Always appends
+ * the universal stock / price-diff / image columns so checkout still works.
+ * Falls back to the legacy fixed columns when no/invalid schema is given.
+ */
+function variant_schema_columns($schemaId)
+{
+    $legacy = [
+        ['key' => 'variant_code', 'label' => 'پس‌کد',           'type' => 'text'],
+        ['key' => 'color',        'label' => 'رنگ',             'type' => 'text'],
+        ['key' => 'size',         'label' => 'سایز',            'type' => 'text'],
+        ['key' => 'stock',        'label' => 'موجودی',          'type' => 'number'],
+        ['key' => 'price_diff',   'label' => 'اختلاف قیمت (+/−)', 'type' => 'number'],
+        ['key' => 'image',        'label' => 'تصویر این تنوع',   'type' => 'image'],
+    ];
+    $schema = variant_schema_get($schemaId);
+    if (!$schema || empty($schema['fields'])) {
+        return $legacy;
+    }
+    $cols = [];
+    $reserved = ['stock', 'price_diff', 'image'];
+    foreach ($schema['fields'] as $f) {
+        // Don't let a custom field collide with the universal ones below.
+        if (in_array($f['key'], $reserved, true)) {
+            continue;
+        }
+        $cols[] = $f;
+    }
+    // Universal columns appended to every schema so stock/pricing/image stay.
+    $cols[] = ['key' => 'stock',      'label' => 'موجودی',          'type' => 'number'];
+    $cols[] = ['key' => 'price_diff', 'label' => 'اختلاف قیمت (+/−)', 'type' => 'number'];
+    $cols[] = ['key' => 'image',      'label' => 'تصویر این تنوع',   'type' => 'image'];
+    return $cols;
 }
 
 // ===========================================================================

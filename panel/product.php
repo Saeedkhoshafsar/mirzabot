@@ -21,7 +21,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add')
     db_query(
       $pdo,
       "INSERT INTO product (name_product,code_product,price_product,Volume_constraint,Service_time,Location,agent,data_limit_reset,note,category,hide_panel,one_buy_status) VALUES (?,?,?,?,?,?,?,'no_reset',?,?,'{}','0')",
-      [$name, $code, (int) ($_POST['price_product'] ?? 0), (int) ($_POST['volume_product'] ?? 0), (int) ($_POST['time_product'] ?? 0), $_POST['namepanel'] ?? '', $_POST['agent_product'] ?? '', $_POST['note_product'] ?? '', $_POST['cetegory_product'] ?? '']
+      [$name, $code, money_int($_POST['price_product'] ?? 0), (int) ($_POST['volume_product'] ?? 0), (int) ($_POST['time_product'] ?? 0), $_POST['namepanel'] ?? '', $_POST['agent_product'] ?? '', $_POST['note_product'] ?? '', $_POST['cetegory_product'] ?? '']
     );
     // Generic product type + attributes (defaults to 'vpn' if unset).
     $newId = (int) $pdo->lastInsertId();
@@ -29,6 +29,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add')
       $ptype = $_POST['product_type'] ?? 'vpn';
       $attrs = is_array($_POST['attr'] ?? null) ? $_POST['attr'] : [];
       set_product_type($newId, $ptype, $attrs);
+      // Attach any per-variant images uploaded with this product.
+      if (!empty($_FILES['media_variant']) && function_exists('product_apply_variant_images')) {
+        product_apply_variant_images($newId, $_FILES['media_variant']);
+      }
     }
     flash('success', $textbotlang['panel']['productAddedPrefix'] . $name . $textbotlang['panel']['productAddedSuffix']);
   } catch (Exception $e) {
@@ -47,12 +51,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'edit'
       db_query(
         $pdo,
         "UPDATE product SET name_product=?,price_product=?,Volume_constraint=?,Service_time=?,Location=?,agent=?,note=?,category=? WHERE id=?",
-        [$name, (int) ($_POST['price_product'] ?? 0), (int) ($_POST['volume_product'] ?? 0), (int) ($_POST['time_product'] ?? 0), $_POST['namepanel'] ?? '', $_POST['agent_product'] ?? '', $_POST['note_product'] ?? '', $_POST['cetegory_product'] ?? '', $pid]
+        [$name, money_int($_POST['price_product'] ?? 0), (int) ($_POST['volume_product'] ?? 0), (int) ($_POST['time_product'] ?? 0), $_POST['namepanel'] ?? '', $_POST['agent_product'] ?? '', $_POST['note_product'] ?? '', $_POST['cetegory_product'] ?? '', $pid]
       );
       // Generic product type + attributes
       $ptype = $_POST['product_type'] ?? 'vpn';
       $attrs = is_array($_POST['attr'] ?? null) ? $_POST['attr'] : [];
       set_product_type($pid, $ptype, $attrs);
+      // Attach any per-variant images uploaded with this product.
+      if (!empty($_FILES['media_variant']) && function_exists('product_apply_variant_images')) {
+        product_apply_variant_images($pid, $_FILES['media_variant']);
+      }
       flash('success', $textbotlang['panel']['productEdited']);
     } catch (Exception $e) {
       flash('error', $textbotlang['panel']['productErrorPrefix'] . $e->getMessage());
@@ -181,7 +189,7 @@ include __DIR__ . '/inc/layout_head.php';
       <h3><?= $textbotlang['panel']['productFieldProductType'] ?></h3>
       <button class="modal-x" onclick="closeModal('addModal')"><?= icon('close', 14) ?></button>
     </div>
-    <form method="POST">
+    <form method="POST" enctype="multipart/form-data">
       <div class="modal-body">
         <input type="hidden" name="_csrf" value="<?= csrf_token() ?>">
         <input type="hidden" name="action" value="add">
@@ -192,7 +200,7 @@ include __DIR__ . '/inc/layout_head.php';
           </div>
           <div class="field">
             <label><?= $textbotlang['panel']['productSaveBtn'] ?></label>
-            <input type="number" name="price_product" class="input" placeholder="<?= htmlspecialchars($textbotlang['panel']['productZeroValue']) ?>" min="0">
+            <input type="text" name="price_product" class="input" data-money inputmode="numeric" placeholder="<?= htmlspecialchars($textbotlang['panel']['productZeroValue']) ?>">
           </div>
           <div class="field">
             <label><?= $textbotlang['panel']['productVolumeGbSuffix'] ?></label>
@@ -254,7 +262,7 @@ include __DIR__ . '/inc/layout_head.php';
       <h3><?= $textbotlang['panel']['productDetailTitle'] ?></h3>
       <button class="modal-x" onclick="closeModal('editModal')"><?= icon('close', 14) ?></button>
     </div>
-    <form method="POST">
+    <form method="POST" enctype="multipart/form-data">
       <div class="modal-body">
         <input type="hidden" name="_csrf" value="<?= csrf_token() ?>">
         <input type="hidden" name="action" value="edit">
@@ -266,7 +274,7 @@ include __DIR__ . '/inc/layout_head.php';
           </div>
           <div class="field">
             <label><?= $textbotlang['panel']['productDetailVolume'] ?></label>
-            <input type="number" name="price_product" id="edit_price" class="input" min="0">
+            <input type="text" name="price_product" id="edit_price" class="input" data-money inputmode="numeric">
           </div>
           <div class="field">
             <label><?= $textbotlang['panel']['productVolumeGbSuffix'] ?></label>
@@ -333,10 +341,41 @@ include __DIR__ . '/inc/layout_head.php';
   .rep-field .rep-actions { width: 38px; text-align: center; }
   .rep-field .rep-del { padding: 2px 10px; line-height: 1; font-size: 16px; }
   .rep-field .rep-add { margin-top: 8px; }
+
+  /* Per-variant image cell (upload a separate photo for each variant). */
+  .rep-img-cell { text-align: center; min-width: 96px; }
+  .rep-img-pick {
+    display: inline-flex; flex-direction: column; align-items: center; gap: 4px;
+    cursor: pointer; padding: 4px; border: 1px dashed var(--border-strong, #cbd5e1);
+    border-radius: 8px; transition: border-color .15s, background .15s;
+  }
+  .rep-img-pick:hover { border-color: var(--accent, #3b82f6); background: var(--accent-s, rgba(59,130,246,.07)); }
+  .rep-img-thumb {
+    width: 52px; height: 52px; object-fit: cover; border-radius: 6px;
+    display: block; background: var(--surface-3, #f1f5f9);
+  }
+  .rep-img-empty {
+    width: 52px; height: 52px; display: flex; align-items: center; justify-content: center;
+    font-size: 10px; color: var(--mute, #94a3b8); border-radius: 6px;
+    background: var(--surface-3, #f1f5f9); text-align: center; line-height: 1.2;
+  }
+  .rep-img-btn { font-size: 11px; color: var(--accent, #3b82f6); font-weight: 600; }
+
+  /* "این محصول پس‌کد دارد" badge shown when >1 variant. */
+  .rep-pscode-badge {
+    display: inline-block; margin-right: 8px; padding: 2px 10px;
+    font-size: 11px; font-weight: 600; border-radius: 999px;
+    color: #b45309; background: #fef3c7; border: 1px solid #fde68a;
+    vertical-align: middle;
+  }
 </style>
 <script>
   // Product types + their attribute field definitions (from product_types()).
   window.PRODUCT_TYPES = <?= json_encode(product_types(), JSON_UNESCAPED_UNICODE) ?>;
+  // Custom variant schemas (category-like variant templates). Each entry:
+  // { id, name, fields:[ {key,label,type,options?,allow_custom?}, ... ] }.
+  // The variants table builds its columns from the chosen schema's fields.
+  window.VARIANT_SCHEMAS = <?= json_encode(function_exists('variant_schemas_list') ? variant_schemas_list() : [], JSON_UNESCAPED_UNICODE) ?>;
 </script>
 <script src="js/product.js"></script>
 <script>

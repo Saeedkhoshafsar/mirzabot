@@ -29,3 +29,8 @@ Thumbs.db
 /uploads/products/*
 !/uploads/products/.htaccess
 !/uploads/products/index.html
+# Keep the per-variant image directory tracked (only its placeholder), but
+# ignore the actual uploaded variant images stored inside it at runtime.
+!/uploads/products/variants
+/uploads/products/variants/*
+!/uploads/products/variants/index.html

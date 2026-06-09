@@ -85,9 +85,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
         exit;
     }
     $kind     = ($_POST['discount_kind'] ?? 'percent') === 'fixed' ? 'fixed' : 'percent';
-    $price    = (int) ($_POST['price'] ?? 0);
-    $maxAmt   = (int) ($_POST['max_amount'] ?? 0);
-    $minOrder = (int) ($_POST['min_order'] ?? 0);
+    $price    = money_int($_POST['price'] ?? 0);
+    $maxAmt   = money_int($_POST['max_amount'] ?? 0);
+    $minOrder = money_int($_POST['min_order'] ?? 0);
     $limit    = (int) ($_POST['limitDiscount'] ?? 0);
     $perUser  = (int) ($_POST['useuser'] ?? 0);
     $expire   = disc_parse_ts($_POST['expire_at'] ?? '');
@@ -143,7 +143,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'gener
     csrf_check_post();
     $count    = (int) ($_POST['count'] ?? 0);
     $kind     = ($_POST['discount_kind'] ?? 'percent') === 'fixed' ? 'fixed' : 'percent';
-    $price    = (int) ($_POST['price'] ?? 0);
+    $price    = money_int($_POST['price'] ?? 0);
     if ($count < 1) {
         flash('error', 'تعداد کدها باید حداقل ۱ باشد.');
         header('Location: discounts.php');
@@ -164,8 +164,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'gener
         'discount_kind' => $kind,
         'limitDiscount' => (int) ($_POST['limitDiscount'] ?? 1),
         'useuser'       => (int) ($_POST['useuser'] ?? 1),
-        'max_amount'    => (int) ($_POST['max_amount'] ?? 0),
-        'min_order'     => (int) ($_POST['min_order'] ?? 0),
+        'max_amount'    => money_int($_POST['max_amount'] ?? 0),
+        'min_order'     => money_int($_POST['min_order'] ?? 0),
         'time'          => disc_parse_ts($_POST['expire_at'] ?? ''),
         'start_at'      => disc_parse_ts($_POST['start_at'] ?? '') ?: '',
         'prefix'        => $_POST['prefix'] ?? '',
@@ -281,12 +281,12 @@ include __DIR__ . '/inc/layout_head.php';
                 <div style="display:flex;gap:10px">
                     <div class="field" style="flex:1">
                         <label>سقف تخفیف (فقط درصدی)</label>
-                        <input type="number" name="max_amount" class="input" min="0" value="0">
+                        <input type="text" name="max_amount" class="input" data-money inputmode="numeric" value="0">
                         <div class="field-hint">۰ = بدون سقف</div>
                     </div>
                     <div class="field" style="flex:1">
                         <label>حداقل مبلغ سفارش</label>
-                        <input type="number" name="min_order" class="input" min="0" value="0">
+                        <input type="text" name="min_order" class="input" data-money inputmode="numeric" value="0">
                     </div>
                 </div>
                 <div style="display:flex;gap:10px">
@@ -360,11 +360,11 @@ include __DIR__ . '/inc/layout_head.php';
                 <div style="display:flex;gap:10px">
                     <div class="field" style="flex:1">
                         <label>سقف تخفیف</label>
-                        <input type="number" name="max_amount" class="input" min="0" value="0">
+                        <input type="text" name="max_amount" class="input" data-money inputmode="numeric" value="0">
                     </div>
                     <div class="field" style="flex:1">
                         <label>حداقل سفارش</label>
-                        <input type="number" name="min_order" class="input" min="0" value="0">
+                        <input type="text" name="min_order" class="input" data-money inputmode="numeric" value="0">
                     </div>
                 </div>
                 <div style="display:flex;gap:10px">

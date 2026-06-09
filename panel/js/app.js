@@ -231,3 +231,67 @@ setTimeout(function () {
         setTimeout(function () { n.remove(); }, 420);
     });
 }, 5500);
+
+// ---------------------------------------------------------------------------
+// Money formatting: show prices with thousands separators (1200000 → 1,200,000)
+// everywhere they are entered or displayed in the panel.
+//   * Inputs marked with [data-money] are formatted live as the user types and
+//     stripped back to a plain integer right before their form submits (so the
+//     server still receives "1200000", not "1,200,000").
+//   * Elements marked with [data-money-text] have their numeric text content
+//     formatted once on load (handy for any spot that prints a raw price).
+// ---------------------------------------------------------------------------
+window.formatMoney = function (value) {
+    var digits = String(value == null ? '' : value).replace(/[^\d]/g, '');
+    if (digits === '') return '';
+    // Trim leading zeros but keep a single zero.
+    digits = digits.replace(/^0+(?=\d)/, '');
+    return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+};
+// Raw integer string (no separators) from a possibly-formatted value.
+window.unformatMoney = function (value) {
+    return String(value == null ? '' : value).replace(/[^\d]/g, '');
+};
+
+(function initMoneyInputs() {
+    function attach(input) {
+        if (input.dataset._moneyBound) return;
+        input.dataset._moneyBound = '1';
+        // number inputs can't render commas — switch to text + numeric keypad.
+        if (input.getAttribute('type') === 'number') {
+            input.setAttribute('type', 'text');
+        }
+        input.setAttribute('inputmode', 'numeric');
+        // Format any value present at load.
+        if (input.value) input.value = window.formatMoney(input.value);
+        input.addEventListener('input', function () {
+            var start = input.selectionStart;
+            var before = input.value;
+            input.value = window.formatMoney(input.value);
+            // Best-effort caret keep when separators shift the text length.
+            var diff = input.value.length - before.length;
+            try { input.setSelectionRange(start + diff, start + diff); } catch (e) {}
+        });
+        // On submit, strip separators so the server gets a plain integer.
+        if (input.form && !input.form.dataset._moneyBound) {
+            input.form.dataset._moneyBound = '1';
+            input.form.addEventListener('submit', function () {
+                this.querySelectorAll('[data-money]').forEach(function (el) {
+                    el.value = window.unformatMoney(el.value);
+                });
+            });
+        }
+    }
+    function scan(root) {
+        (root || document).querySelectorAll('input[data-money]').forEach(attach);
+        (root || document).querySelectorAll('[data-money-text]').forEach(function (el) {
+            if (el.dataset._moneyBound) return;
+            el.dataset._moneyBound = '1';
+            el.textContent = window.formatMoney(el.textContent);
+        });
+    }
+    document.addEventListener('DOMContentLoaded', function () { scan(document); });
+    scan(document);
+    // Re-scan after dynamic forms (e.g. product modals) inject new inputs.
+    window.rescanMoneyInputs = function (root) { scan(root); };
+})();
