@@ -56,6 +56,17 @@ $captionHtml = tg_caption_to_html($view['caption']);
 
 // Variants (for physical products with تنوع) — show a small selector demo.
 $attrs = function_exists('product_attributes') ? product_attributes($product) : [];
+
+// Product "code" preference: the seller's کد انبار (SKU) when present, else the
+// auto-generated code_product. The SKU may be a single attr (no variants) or
+// supplied per-variant; for the header we use the single-stock SKU when set.
+$skuVal = '';
+if (isset($attrs['sku']) && trim((string) $attrs['sku']) !== '') {
+    $skuVal = trim((string) $attrs['sku']);
+}
+$productCode = $skuVal !== '' ? $skuVal : (string) ($product['code_product'] ?? '');
+$codeIsSku   = ($skuVal !== '');
+
 $variants = [];
 if ($ptype === 'physical' && !empty($attrs['variants']) && is_array($attrs['variants'])) {
     $cols = [];
@@ -72,7 +83,7 @@ if ($ptype === 'physical' && !empty($attrs['variants']) && is_array($attrs['vari
             // Build a label from non-reserved columns.
             $parts = [];
             foreach ($v as $ck => $cv) {
-                if (in_array($ck, ['stock', 'price_diff', 'image'], true)) {
+                if (in_array($ck, ['stock', 'price_diff', 'image', 'sku'], true)) {
                     continue;
                 }
                 if (is_array($cv)) {
@@ -134,8 +145,27 @@ if (!$embed) {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>نمایش محصول</title>
+    <!-- Load the SAME stylesheet + theme as the panel so the embedded preview
+         uses the panel's fonts, colours and CSS variables (matches full page). -->
+    <link rel="stylesheet" href="css/style.css">
+    <script>
+      (function () {
+        var t = localStorage.getItem('panel-theme') || 'navy';
+        var bg = { navy:'#0F172A', purple:'#180D2E', emerald:'#0A1F1C',
+          sunset:'#1A0D0D', slate:'#080808', light:'#F1F5F9',
+          linen:'#FAF7F2', mint:'#F0FDF4', lavender:'#FAF5FF' };
+        var root = document.documentElement;
+        root.style.backgroundColor = bg[t] || '#0F172A';
+        root.setAttribute('data-theme', t);
+        root.style.colorScheme = (t==='light'||t==='linen'||t==='mint'||t==='lavender') ? 'light' : 'dark';
+      }());
+    </script>
+    <style>
+      /* Embedded preview: comfortable padding + inherit the panel body styles. */
+      body { margin: 0; padding: 16px; background: var(--bg, #0F172A); color: var(--text, #e2e8f0); }
+    </style>
   </head>
-  <body style="margin:0">
+  <body>
 <?php endif; ?>
 
 <style>
@@ -210,15 +240,20 @@ if (!$embed) {
     </div>
     <div class="pv-chat">
       <?php if (!empty($view['media'])): ?>
-        <?php foreach ($view['media'] as $i => $m): ?>
+        <?php foreach ($view['media'] as $i => $m):
+          // The panel serves the stored files directly via a relative path
+          // (../uploads/...), exactly like product_media.php — so the preview
+          // shows the SAME images we keep in the database, no domain needed.
+          $src = !empty($m['file_path']) ? '../' . $m['file_path'] : ($m['url'] ?? '');
+        ?>
           <div class="pv-bubble">
             <div class="pv-media">
               <?php if ($m['type'] === 'image'): ?>
-                <img src="<?= htmlspecialchars($m['url']) ?>" alt="media" onerror="this.parentNode.innerHTML='<div class=\'pv-empty-media\'>تصویر در دسترس نیست (در ربات از file_id ارسال می‌شود)</div>'">
+                <img src="<?= htmlspecialchars($src) ?>" alt="media" onerror="this.parentNode.innerHTML='<div class=\'pv-empty-media\'>فایل تصویر یافت نشد</div>'">
               <?php elseif ($m['type'] === 'video'): ?>
-                <video src="<?= htmlspecialchars($m['url']) ?>" controls muted></video>
+                <video src="<?= htmlspecialchars($src) ?>" controls muted></video>
               <?php else: ?>
-                <div class="pv-media-audio">🎵 <span>فایل صوتی محصول</span></div>
+                <div class="pv-media-audio">🎵 <audio src="<?= htmlspecialchars($src) ?>" controls style="width:100%"></audio></div>
               <?php endif; ?>
             </div>
           </div>
@@ -250,7 +285,10 @@ if (!$embed) {
       <div class="pv-row"><span class="k">نام</span><span class="v"><?= htmlspecialchars($product['name_product'] ?? '') ?></span></div>
       <div class="pv-row"><span class="k">نوع محصول</span><span class="v"><?= htmlspecialchars($ptypeLabel) ?></span></div>
       <div class="pv-row"><span class="k">قیمت</span><span class="v"><?= number_format((int) ($view['price'] ?? 0)) ?> <?= htmlspecialchars($view['currency'] ?? '') ?></span></div>
-      <div class="pv-row"><span class="k">کد محصول</span><span class="v" style="font-family:monospace"><?= htmlspecialchars($product['code_product'] ?? '') ?></span></div>
+      <div class="pv-row"><span class="k"><?= $codeIsSku ? 'کد انبار (SKU)' : 'کد محصول' ?></span><span class="v" style="font-family:monospace"><?= htmlspecialchars($productCode) ?></span></div>
+      <?php if (function_exists('product_variant_count')): $pcCount = product_variant_count($product); if ($pcCount > 1): ?>
+        <div class="pv-row"><span class="k">تعداد پس‌کد</span><span class="v"><?= (int) $pcCount ?> پس‌کد (یک کد، چند محصول)</span></div>
+      <?php endif; endif; ?>
       <?php if (function_exists('product_tracks_stock') && product_tracks_stock($product)): $st = product_stock($product); ?>
         <div class="pv-row"><span class="k">موجودی کل</span><span class="v"><?= $st === null ? 'نامحدود' : number_format($st) . ' عدد' ?></span></div>
       <?php endif; ?>
@@ -286,7 +324,7 @@ if (!$embed) {
     <?php endif; ?>
 
     <div class="pv-info-card">
-      <p class="pv-note" style="margin:0">💡 این فقط یک <b>دمو</b> است؛ دکمه‌ها در پیش‌نمایش غیرفعال‌اند. تصاویر از روی آدرس عمومی سرور نمایش داده می‌شوند و در ربات واقعی از طریق file_id تلگرام ارسال می‌گردند.</p>
+      <p class="pv-note" style="margin:0">💡 این فقط یک <b>دمو</b> است؛ دکمه‌ها در پیش‌نمایش غیرفعال‌اند. تصاویر همان فایل‌های ذخیره‌شده در پایگاه‌دادهٔ شما هستند که این‌جا مستقیماً نمایش داده می‌شوند.</p>
     </div>
   </div>
 </div>

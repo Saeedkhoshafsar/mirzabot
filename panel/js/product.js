@@ -310,16 +310,31 @@ function variantColumnsForSchema(id) {
 
 // Append the universal stock / price-diff columns to a list of seller-built
 // custom columns (mirrors PHP variant_columns_with_builtins()).
+// NOTE: stock & price_diff may be seeded as *removable default* columns (so the
+// seller sees «موجودی»/«کد انبار» chips the moment تنوع is enabled). When they
+// are already present in customCols we KEEP them in place (removable) and only
+// auto-append the ones that are missing — so they never duplicate.
 function variantColumnsWithBuiltins(customCols) {
-    var reserved = { stock: 1, price_diff: 1 };
     var cols = [];
+    var seen = {};
     (customCols || []).forEach(function (c) {
-        if (c && c.key && reserved[c.key]) return;
+        if (!c || !c.key || seen[c.key]) return;
+        seen[c.key] = 1;
         cols.push(c);
     });
-    cols.push({ key: 'stock', label: 'موجودی', type: 'number' });
-    cols.push({ key: 'price_diff', label: 'اختلاف قیمت (+/−)', type: 'number' });
+    if (!seen['stock'])      cols.push({ key: 'stock', label: 'موجودی', type: 'number' });
+    if (!seen['price_diff']) cols.push({ key: 'price_diff', label: 'اختلاف قیمت (+/−)', type: 'number' });
     return cols;
+}
+
+// Default removable columns seeded into the variants builder the first time
+// «پس‌کد/تنوع دارد» is ticked: کد انبار (SKU) + موجودی. They behave exactly like
+// columns the seller added (شکل چیپ، قابل حذف) but are present by default.
+function variantDefaultColumns() {
+    return [
+        { key: 'sku',   label: 'کد انبار', type: 'text' },
+        { key: 'stock', label: 'موجودی',   type: 'number' }
+    ];
 }
 
 // Render a full repeater field (a labelled table + "add row" button).
@@ -1013,6 +1028,21 @@ window.onBoolToggle = function (cb) {
     }
     if (hidden) hidden.value = cb.checked ? 1 : 0;
     applyShowWhen(cb.closest('.modal-body') || document);
+
+    // When «پس‌کد/تنوع دارد» is just turned ON and the variants builder has no
+    // columns yet, seed it with the default removable columns (کد انبار + موجودی)
+    // so the seller immediately sees them as chips — exactly as if they'd added
+    // them. They remain fully removable.
+    if (key === 'has_variants' && cb.checked) {
+        var modalBody = cb.closest('.modal-body') || document;
+        var vfield = modalBody.querySelector('.rep-field[data-builder="1"]');
+        if (vfield) {
+            var existingCols = variantReadCustomCols(vfield);
+            if (!existingCols.length) {
+                variantRebuildField(vfield, variantDefaultColumns());
+            }
+        }
+    }
 };
 
 // Show/hide any [data-show-when="boolKey"] block based on its gating checkbox,
@@ -1145,11 +1175,7 @@ window.openEditModal = function (p) {
     }
     renderAttrFields('edit', attrs || {});
 
-    // Point the "manage media" button at this product's media page (Audit-1).
-    var mediaLink = document.getElementById('edit_media_link');
-    if (mediaLink && p.id) {
-        mediaLink.setAttribute('href', 'product_media.php?pid=' + encodeURIComponent(p.id));
-    }
+    // (دکمهٔ «مدیریت رسانه» حذف شد — رسانه اکنون از بخش ویژگی‌ها افزوده می‌شود.)
 
     openModal('editModal');
 };
