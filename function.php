@@ -1875,13 +1875,16 @@ function product_types()
                 ['key' => 'stock',         'label' => 'موجودی کل (اگر واریانت ندارد)', 'type' => 'number', 'hint' => 'اگر از واریانت‌ها استفاده می‌کنید، خالی بگذارید'],
                 ['key' => 'weight',        'label' => 'وزن (گرم)', 'type' => 'number', 'hint' => 'برای محاسبهٔ هزینهٔ ارسال'],
                 ['key' => 'needs_address', 'label' => 'نیاز به آدرس پستی', 'type' => 'bool', 'hint' => 'دریافت آدرس هنگام خرید'],
-                // Variants: each color/size combination has its own stock & price diff.
-                ['key' => 'variants', 'label' => 'تنوع محصول (رنگ/سایز)', 'type' => 'repeater',
-                 'hint' => 'برای هر رنگ/سایز یک ردیف بسازید؛ موجودی و قیمت هرکدام مستقل است.',
+                // Variants: each color/size combination has its own code, stock & price diff.
+                // "پس‌کد" / variant code (e.g. 2345-1, 2345-2) is OPTIONAL — leave blank if the
+                // product has no separate codes per variant.
+                ['key' => 'variants', 'label' => 'تنوع محصول (رنگ/سایز/پس‌کد)', 'type' => 'repeater',
+                 'hint' => 'اختیاری: برای هر رنگ/سایز یک ردیف بسازید. اگر هر تنوع پس‌کد جدا دارد (مثلاً ۲۳۴۵-۱، ۲۳۴۵-۲) در ستون «پس‌کد» وارد کنید؛ در غیر این صورت خالی بگذارید.',
                  'columns' => [
+                    ['key' => 'variant_code', 'label' => 'پس‌کد (اختیاری)', 'type' => 'text'],
                     ['key' => 'color',      'label' => 'رنگ',           'type' => 'text'],
                     ['key' => 'size',       'label' => 'سایز',          'type' => 'text'],
-                    ['key' => 'sku',        'label' => 'کد (SKU)',       'type' => 'text'],
+                    ['key' => 'sku',        'label' => 'کد انبار (SKU)', 'type' => 'text'],
                     ['key' => 'stock',      'label' => 'موجودی',         'type' => 'number'],
                     ['key' => 'price_diff', 'label' => 'اختلاف قیمت (+/−)', 'type' => 'number'],
                  ],
