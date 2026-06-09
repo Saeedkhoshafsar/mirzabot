@@ -468,7 +468,7 @@
     }
     if (type === 'n8n') {
       return {
-        n8n_mode: 'async', n8n_endpoint: '', n8n_tag: '', n8n_timeout_sec: 5,
+        n8n_mode: 'async', n8n_endpoint: '', n8n_endpoint_ref: '', n8n_tag: '', n8n_timeout_sec: 5,
         send_path: true, send_inputs: true, wait_message: 'در حال بررسی…'
       };
     }
@@ -900,8 +900,31 @@
           'اگر مطمئن نیستید، یکی از این‌ها را بزنید؛ فقط کافی است بعد آدرس Webhook را وارد کنید.',
           applyPreset)
       ));
+      // --- Transparency: explain how this differs from the global automation page ---
+      rows.push(h('div', { className: 'sys-warn', key: 'gn8nexplain', style: { background: '#0c2a3a', borderColor: '#0e7490', color: '#a5f3fc' } },
+        h('div', { style: { fontWeight: 800, marginBottom: '4px' } }, '🔌 این نود چه فرقی با صفحهٔ «اتوماسیون و n8n» دارد؟'),
+        h('div', null, 'این نود فقط وقتی کاربر روی همین دکمه کلیک کند، اطلاعات را به n8n می‌فرستد (در لحظهٔ تعامل).'),
+        h('div', { style: { marginTop: '4px' } }, 'صفحهٔ «اتوماسیون و n8n» برای رویدادهای کلی ربات است (مثل ثبت سفارش جدید) که خودکار و بدون کلیک کاربر ارسال می‌شوند. اگر آدرس Webhook خود را آنجا یک‌بار تعریف کرده‌اید، می‌توانید پایین همان را «اتصال ذخیره‌شده» انتخاب کنید تا دوبار وارد نکنید.')
+      ));
+      // --- Reuse a saved (global) endpoint instead of pasting the URL again ---
+      var savedEps = (window.FLOW_N8N_ENDPOINTS || []).filter(function (e) { return e && e.url; });
+      var usingRef = (cfg.n8n_endpoint_ref || '') !== '';
       rows.push(h('div', { className: 'grp', key: 'gn8n' },
         h('div', { className: 'grp-t' }, 'اتصال به n8n'),
+        savedEps.length ? field('استفاده از اتصال ذخیره‌شده (اختیاری)',
+          h('select', {
+            value: cfg.n8n_endpoint_ref || '',
+            onChange: function (e) { setCfg('n8n_endpoint_ref', e.target.value); }
+          },
+            [h('option', { value: '', key: 'none' }, '— آدرس را دستی وارد می‌کنم —')].concat(
+              savedEps.map(function (ep, i) {
+                var lbl = (ep.name && ep.name.length ? ep.name : ep.url);
+                return h('option', { value: ep.name || ep.url, key: 'ep' + i }, lbl);
+              })
+            )
+          ),
+          'اتصال‌های ذخیره‌شده در صفحهٔ «اتوماسیون و n8n» تعریف می‌شوند. با انتخاب یکی، آدرس و کلید امضا خودکار از همان‌جا گرفته می‌شود (تعریف در یک جا = به‌روزرسانی در همه‌جا).') : null,
+        usingRef ? h('div', { className: 'fld hlp', key: 'refnote', style: { color: '#5eead4' } }, '✓ این نود از اتصال ذخیره‌شده استفاده می‌کند؛ نیازی به وارد کردن آدرس نیست.') :
         field('آدرس Webhook (از n8n کپی کنید)',
           h('input', { type: 'text', value: cfg.n8n_endpoint || '', placeholder: 'https://n8n.example.com/webhook/...', onChange: function (e) { setCfg('n8n_endpoint', e.target.value); } }),
           'این آدرس را از داخل سناریوی n8n خود (گرهِ Webhook) بردارید. بدون آن، این نود کاری نمی‌کند.'),
