@@ -2987,6 +2987,8 @@ Panel name : %s
                 'dailyPanelsReportTitle' => 'Panels report :
 
 ',
+                'dailyPanelsReportEmpty' => 'ℹ️ No panel has been added to the bot yet. Once you add a panel, per-panel sales stats will appear in this report.
+',
                 'dailyTopAgentRow' => '
 User numeric ID : %s
 User username : %s

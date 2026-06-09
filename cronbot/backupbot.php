@@ -124,7 +124,26 @@ if ($return_var !== 0) {
 
     // Keep the Telegram message short: Telegram captions/text have limits and
     // the raw dump error can be long, so trim it.
-    $detail = $dumpStderr !== '' ? mb_substr($dumpStderr, 0, 600) : '';
+    $detail = $dumpStderr !== ''
+        ? (function_exists('mb_substr') ? mb_substr($dumpStderr, 0, 600) : substr($dumpStderr, 0, 600))
+        : '';
+
+    // mysqldump sometimes fails WITHOUT writing anything to stderr (e.g. it
+    // was killed, the shell couldn't spawn it, or the output redirect failed).
+    // In that case fall back to whatever diagnostic info we do have, so the
+    // Telegram message is NEVER just a bare "❌" with no clue.
+    if ($detail === '') {
+        if ($mysqldumpMissing) {
+            $detail = 'دستور mysqldump روی سرور پیدا نشد (در PATH نیست).';
+        } else {
+            $detail = 'mysqldump بدون پیام خطا و با کد خروج ' . (int) $return_var . ' متوقف شد '
+                . '(فایل خروجی ' . ((@file_exists($backup_file_name) && @filesize($backup_file_name) > 0) ? 'ساخته شد ولی ناقص بود' : 'اصلاً ساخته نشد') . ').';
+        }
+    }
+    if ($hint === '' && $detail !== '') {
+        $hint = 'برای دیدن علت دقیق، آدرس cronbot/backuptest.php را در مرورگر باز کنید.';
+    }
+
     $msg = $textbotlang['keyboard']['backupError'];
     if ($hint !== '') {
         $msg .= "\n\n🔎 علت احتمالی: " . $hint;
