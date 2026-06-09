@@ -2987,6 +2987,8 @@ f,n.n2',
                 'dailyPanelsReportTitle' => '面板报告：
 
 ',
+                'dailyPanelsReportEmpty' => 'ℹ️ 机器人尚未添加任何面板。添加面板后，各面板的销售统计将显示在此报告中。
+',
                 'dailyTopAgentRow' => '
 用户数字 ID：%s
 用户用户名：%s

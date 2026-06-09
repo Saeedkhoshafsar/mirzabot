@@ -101,25 +101,37 @@ foreach ($listagentuser as $agent) {
     $textagent .= sprintf($textbotlang['hardcoded']['dailyTopAgentRow'], $agent['id'], $agent['username'], $agent['total_spent']);
 }
 
-// Fetch panel reports
+// Fetch panel reports.
+// select(... "fetchAll") can return null/false if the table is empty or the
+// query hiccups, so coerce to an array before looping (PHP 8 throws on
+// foreach over null). When there are no panels yet, the message would
+// otherwise be just the bare title "گزارش پنل ها :" with nothing under it,
+// which looks broken — so we add an explicit "no panels registered" note.
 $panels = select("marzban_panel", "*", null, null, "fetchAll");
+if (!is_array($panels)) {
+    $panels = [];
+}
 $textpanel = $textbotlang['hardcoded']['dailyPanelsReportTitle'];
-foreach ($panels as $panel) {
-    $sqlPanel = "SELECT COUNT(*) AS orders, SUM(price_product) AS total_price, SUM(Volume) AS total_volume 
-                 FROM invoice 
-                 WHERE (FROM_UNIXTIME(time_sell) BETWEEN :startDate AND :endDate) 
-                 AND (status IN ('active', 'end_of_time', 'sendedwarn', 'send_on_hold')) 
-                 AND Service_location = :location 
-                 AND name_product != '{$textbotlang['Admin']['adminphp']['db_test_service_name']}'";
-    $params = [':startDate' => $datefirst, ':endDate' => $dateend, ':location' => $panel['name_panel']];
-    $stmt = executeQuery($pdo, $sqlPanel, $params);
-    $result = $stmt->fetch(PDO::FETCH_ASSOC);
+if (empty($panels)) {
+    $textpanel .= $textbotlang['hardcoded']['dailyPanelsReportEmpty'];
+} else {
+    foreach ($panels as $panel) {
+        $sqlPanel = "SELECT COUNT(*) AS orders, SUM(price_product) AS total_price, SUM(Volume) AS total_volume 
+                     FROM invoice 
+                     WHERE (FROM_UNIXTIME(time_sell) BETWEEN :startDate AND :endDate) 
+                     AND (status IN ('active', 'end_of_time', 'sendedwarn', 'send_on_hold')) 
+                     AND Service_location = :location 
+                     AND name_product != '{$textbotlang['Admin']['adminphp']['db_test_service_name']}'";
+        $params = [':startDate' => $datefirst, ':endDate' => $dateend, ':location' => $panel['name_panel']];
+        $stmt = executeQuery($pdo, $sqlPanel, $params);
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    $orders = $result['orders'] ?? 0;
-    $total_price = $result['total_price'] ?? 0;
-    $total_volume = $result['total_volume'] ?? 0;
+        $orders = $result['orders'] ?? 0;
+        $total_price = $result['total_price'] ?? 0;
+        $total_volume = $result['total_volume'] ?? 0;
 
-    $textpanel .= sprintf($textbotlang['hardcoded']['dailyPanelReportRow'], $panel['name_panel'], $orders, $total_price, $total_volume);
+        $textpanel .= sprintf($textbotlang['hardcoded']['dailyPanelReportRow'], $panel['name_panel'], $orders, $total_price, $total_volume);
+    }
 }
 
 // Daily report text
