@@ -4386,6 +4386,15 @@ function shop_product_view_data($product)
         ];
     }
 
+    // Also include per-variant images stored in the product attributes (these
+    // are uploaded from the «ویژگی‌ها/تنوع» builder, not the product_media table).
+    // This is why a variant-only product still shows its photo in the bot/preview.
+    if (count($media) < 5 && function_exists('product_variant_images')) {
+        foreach (product_variant_images($product, 5 - count($media)) as $vm) {
+            $media[] = $vm;
+        }
+    }
+
     $lines = [];
     $lines[] = "🛍 <b>" . htmlspecialchars($product['name_product'] ?? '') . "</b>";
     if (!empty($product['note'])) {
@@ -6262,16 +6271,126 @@ function product_display_code($product)
         return ['code' => trim((string) $attrs['sku']), 'is_sku' => true];
     }
 
-    // 2) first non-empty per-variant SKU (when تنوع is enabled).
+    // 2) per-variant SKU/کد انبار (when تنوع is enabled). The "code" column the
+    //    seller fills is normally keyed `sku`, but a seller could build their own
+    //    column whose label means "کد"/"کد انبار"; treat those as the code too.
     if (!empty($attrs['variants']) && is_array($attrs['variants'])) {
+        // Map column keys → labels so we can recognise a "code" column by label.
+        $codeKeys = ['sku' => true];
+        if (!empty($attrs['_variant_cols']) && function_exists('variant_normalize_columns')) {
+            foreach (variant_normalize_columns($attrs['_variant_cols']) as $c) {
+                $lbl = isset($c['label']) ? (string) $c['label'] : '';
+                $isText = !isset($c['type']) || in_array($c['type'], ['text', 'number', 'url'], true);
+                // A column whose label mentions کد/انبار/SKU acts as the code.
+                if ($isText && (stripos($lbl, 'کد') !== false || stripos($lbl, 'انبار') !== false
+                    || stripos($lbl, 'sku') !== false)) {
+                    $codeKeys[$c['key']] = true;
+                }
+            }
+        }
         foreach ($attrs['variants'] as $v) {
-            if (is_array($v) && isset($v['sku']) && trim((string) $v['sku']) !== '') {
-                return ['code' => trim((string) $v['sku']), 'is_sku' => true];
+            if (!is_array($v)) {
+                continue;
+            }
+            foreach ($codeKeys as $ck => $_) {
+                if (isset($v[$ck]) && !is_array($v[$ck]) && trim((string) $v[$ck]) !== '') {
+                    return ['code' => trim((string) $v[$ck]), 'is_sku' => true];
+                }
             }
         }
     }
 
     return ['code' => $fallback, 'is_sku' => false];
+}
+
+/**
+ * The set of variant column keys that act as the product "code" (کد انبار).
+ * Used by the preview/variant table so the code column is never duplicated as a
+ * "تنوع" (variation) label. Always includes `sku`; adds any seller-built column
+ * whose label means کد/انبار/SKU.
+ */
+function product_variant_code_keys($attrs)
+{
+    $keys = ['sku' => true];
+    if (!empty($attrs['_variant_cols']) && function_exists('variant_normalize_columns')) {
+        foreach (variant_normalize_columns($attrs['_variant_cols']) as $c) {
+            $lbl = isset($c['label']) ? (string) $c['label'] : '';
+            $isText = !isset($c['type']) || in_array($c['type'], ['text', 'number', 'url'], true);
+            if ($isText && (stripos($lbl, 'کد') !== false || stripos($lbl, 'انبار') !== false
+                || stripos($lbl, 'sku') !== false)) {
+                $keys[$c['key']] = true;
+            }
+        }
+    }
+    return array_keys($keys);
+}
+
+/**
+ * Collect per-variant images stored in the product attributes (variants[]).
+ * Variant images live in attrs['variants'][i]['image'] (legacy) or in any
+ * image-type column attrs['variants'][i][colKey][slot] (new builder). These are
+ * stored as relative upload paths (uploads/products/...). Returns a list of
+ * ['file_path' => relative, 'url' => public-or-relative] de-duplicated, capped.
+ */
+function product_variant_images($product, $limit = 5)
+{
+    global $domainhosts;
+    $attrs = function_exists('product_attributes') ? product_attributes($product) : [];
+    if (empty($attrs['variants']) || !is_array($attrs['variants'])) {
+        return [];
+    }
+
+    // Which custom columns are image-type? (new 4-level layout stores under them)
+    $imageCols = [];
+    if (!empty($attrs['_variant_cols']) && function_exists('variant_normalize_columns')) {
+        foreach (variant_normalize_columns($attrs['_variant_cols']) as $c) {
+            if (($c['type'] ?? '') === 'image') {
+                $imageCols[$c['key']] = true;
+            }
+        }
+    }
+
+    $collect = [];
+    $pushPath = function ($p) use (&$collect) {
+        $p = ltrim((string) $p, '/');
+        if ($p !== '' && !in_array($p, $collect, true)) {
+            $collect[] = $p;
+        }
+    };
+
+    foreach ($attrs['variants'] as $v) {
+        if (!is_array($v)) {
+            continue;
+        }
+        // legacy single 'image'
+        if (!empty($v['image']) && !is_array($v['image'])) {
+            $pushPath($v['image']);
+        }
+        // new image columns: value is an array of slot => url (or a single url)
+        foreach ($v as $ck => $cv) {
+            if (!isset($imageCols[$ck])) {
+                continue;
+            }
+            if (is_array($cv)) {
+                foreach ($cv as $slot) {
+                    if (!is_array($slot) && trim((string) $slot) !== '') {
+                        $pushPath($slot);
+                    }
+                }
+            } elseif (trim((string) $cv) !== '') {
+                $pushPath($cv);
+            }
+        }
+    }
+
+    $out = [];
+    foreach (array_slice($collect, 0, $limit) as $fp) {
+        $url = (!empty($domainhosts))
+            ? rtrim((strpos($domainhosts, 'http') === 0 ? $domainhosts : 'https://' . $domainhosts), '/') . '/' . $fp
+            : $fp;
+        $out[] = ['type' => 'image', 'ref' => $url, 'url' => $url, 'file_path' => $fp];
+    }
+    return $out;
 }
 
 /**
