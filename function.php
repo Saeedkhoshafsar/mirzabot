@@ -4386,14 +4386,11 @@ function shop_product_view_data($product)
         ];
     }
 
-    // Also include per-variant images stored in the product attributes (these
-    // are uploaded from the «ویژگی‌ها/تنوع» builder, not the product_media table).
-    // This is why a variant-only product still shows its photo in the bot/preview.
-    if (count($media) < 5 && function_exists('product_variant_images')) {
-        foreach (product_variant_images($product, 5 - count($media)) as $vm) {
-            $media[] = $vm;
-        }
-    }
+    // NOTE: per-variant images (uploaded from the «ویژگی‌ها/تنوع» builder) are
+    // intentionally NOT merged here — the product card must stay clean with the
+    // main product image only. Variant images are delivered separately via the
+    // «🖼 نمایش همهٔ پس‌کدها» button (shop_send_variant_gallery), each with its
+    // own caption describing that variant.
 
     $lines = [];
     $lines[] = "🛍 <b>" . htmlspecialchars($product['name_product'] ?? '') . "</b>";
@@ -4432,6 +4429,14 @@ function shop_product_view_data($product)
         $kb['inline_keyboard'][] = [[
             'text' => "🏷 کد تخفیف",
             'callback_data' => "shopcoupon_" . (int) $product['id'],
+        ]];
+    }
+    // When the product carries per-variant (پس‌کد) images, offer a button that
+    // sends the whole gallery — each photo captioned with its own variant.
+    if (function_exists('product_variant_images') && count(product_variant_images($product, 1)) > 0) {
+        $kb['inline_keyboard'][] = [[
+            'text' => "🖼 نمایش همهٔ پس‌کدها",
+            'callback_data' => "shopgallery_" . (int) $product['id'],
         ]];
     }
     $kb['inline_keyboard'][] = [
@@ -5286,6 +5291,18 @@ function shop_handle_callback($datain, $from_id, $user)
             return true;
         }
         shop_render_product($from_id, $product);
+        return true;
+    }
+
+    // Send the «نمایش همهٔ پس‌کدها» gallery: every variant image with its own
+    // caption (ویژگی‌ها/کد انبار/موجودی/قیمت).
+    if (preg_match('/^shopgallery_(\d+)$/', $datain, $m)) {
+        $product = shop_product((int) $m[1]);
+        if (!$product) {
+            sendmessage($from_id, "محصول یافت نشد.", null, 'html');
+            return true;
+        }
+        shop_send_variant_gallery($from_id, $product);
         return true;
     }
 
@@ -6391,6 +6408,152 @@ function product_variant_images($product, $limit = 5)
         $out[] = ['type' => 'image', 'ref' => $url, 'url' => $url, 'file_path' => $fp];
     }
     return $out;
+}
+
+/**
+ * Build the "پس‌کد gallery": one entry per variant image, each with a caption
+ * describing that exact variant (ویژگی‌ها + کد انبار + موجودی + اختلاف قیمت).
+ * Used by the «🖼 نمایش همهٔ پس‌کدها» button so each photo is sent with its own
+ * meaningful caption rather than a single cluttered product card.
+ *
+ * Returns a list of: ['ref' => url, 'file_path' => rel, 'caption' => html].
+ */
+function shop_variant_gallery_items($product, $limit = 10)
+{
+    global $domainhosts;
+    $attrs = function_exists('product_attributes') ? product_attributes($product) : [];
+    if (empty($attrs['variants']) || !is_array($attrs['variants'])) {
+        return [];
+    }
+
+    $cur = function_exists('store_currency') ? store_currency() : '';
+    $basePrice = (int) preg_replace('/[^\d]/', '', (string) ($product['price_product'] ?? '0'));
+
+    // Column metadata: which are images, which are code columns, and key→label.
+    $imageCols = [];
+    $colLabels = [];
+    if (!empty($attrs['_variant_cols']) && function_exists('variant_normalize_columns')) {
+        foreach (variant_normalize_columns($attrs['_variant_cols']) as $c) {
+            $colLabels[$c['key']] = $c['label'] ?? $c['key'];
+            if (($c['type'] ?? '') === 'image') {
+                $imageCols[$c['key']] = true;
+            }
+        }
+    }
+    $codeKeys = function_exists('product_variant_code_keys')
+        ? product_variant_code_keys($attrs) : ['sku'];
+
+    $absUrl = function ($p) use ($domainhosts) {
+        $p = ltrim((string) $p, '/');
+        return (!empty($domainhosts))
+            ? rtrim((strpos($domainhosts, 'http') === 0 ? $domainhosts : 'https://' . $domainhosts), '/') . '/' . $p
+            : $p;
+    };
+
+    $items = [];
+    foreach ($attrs['variants'] as $v) {
+        if (!is_array($v)) {
+            continue;
+        }
+
+        // Gather this row's images (legacy 'image' + image columns).
+        $imgs = [];
+        if (!empty($v['image']) && !is_array($v['image'])) {
+            $imgs[] = $v['image'];
+        }
+        foreach ($v as $ck => $cv) {
+            if (!isset($imageCols[$ck])) {
+                continue;
+            }
+            if (is_array($cv)) {
+                foreach ($cv as $slot) {
+                    if (!is_array($slot) && trim((string) $slot) !== '') {
+                        $imgs[] = $slot;
+                    }
+                }
+            } elseif (trim((string) $cv) !== '') {
+                $imgs[] = $cv;
+            }
+        }
+        if (empty($imgs)) {
+            continue;
+        }
+
+        // Build a caption from this row's non-image fields.
+        $skip = array_merge(['price_diff', 'image'], array_keys($imageCols));
+        $parts = [];
+        $codeVal = '';
+        foreach ($v as $ck => $cv) {
+            if (is_array($cv) || in_array($ck, $skip, true)) {
+                continue;
+            }
+            $cv = trim((string) $cv);
+            if ($cv === '') {
+                continue;
+            }
+            if (in_array($ck, $codeKeys, true)) {
+                if ($codeVal === '') {
+                    $codeVal = $cv;
+                }
+                continue; // code shown separately
+            }
+            if ($ck === 'stock') {
+                continue; // stock shown separately
+            }
+            $lbl = $colLabels[$ck] ?? $ck;
+            $parts[] = '<b>' . htmlspecialchars($lbl) . ':</b> ' . htmlspecialchars($cv);
+        }
+
+        $capLines = ['🛍 <b>' . htmlspecialchars($product['name_product'] ?? '') . '</b>'];
+        if (!empty($parts)) {
+            $capLines[] = implode(' • ', $parts);
+        }
+        if ($codeVal !== '') {
+            $capLines[] = '🔖 کد انبار: <code>' . htmlspecialchars($codeVal) . '</code>';
+        }
+        $diff = isset($v['price_diff']) && $v['price_diff'] !== ''
+            ? (int) preg_replace('/[^\-\d]/', '', (string) $v['price_diff']) : 0;
+        $rowPrice = max(0, $basePrice + $diff);
+        $capLines[] = '💰 ' . number_format($rowPrice) . ' ' . $cur
+            . ($diff !== 0 ? ' (' . ($diff > 0 ? '+' : '') . number_format($diff) . ')' : '');
+        if (isset($v['stock']) && $v['stock'] !== '') {
+            $st = (int) $v['stock'];
+            $capLines[] = $st > 0 ? '✅ موجودی: ' . number_format($st) . ' عدد' : '⛔️ ناموجود';
+        }
+        $caption = implode("\n", $capLines);
+
+        foreach ($imgs as $fp) {
+            $items[] = ['ref' => $absUrl($fp), 'file_path' => ltrim((string) $fp, '/'), 'caption' => $caption];
+            if (count($items) >= $limit) {
+                return $items;
+            }
+        }
+    }
+    return $items;
+}
+
+/**
+ * Send the «نمایش همهٔ پس‌کدها» gallery to a chat: each variant photo with its
+ * own caption. Returns the number of photos sent.
+ */
+function shop_send_variant_gallery($from_id, $product)
+{
+    $items = shop_variant_gallery_items($product, 10);
+    if (empty($items)) {
+        sendmessage($from_id, "برای این محصول تصویری از پس‌کدها ثبت نشده است.", null, 'html');
+        return 0;
+    }
+    $sent = 0;
+    foreach ($items as $it) {
+        telegram('sendPhoto', [
+            'chat_id'    => $from_id,
+            'photo'      => $it['ref'],
+            'caption'    => $it['caption'],
+            'parse_mode' => 'HTML',
+        ]);
+        $sent++;
+    }
+    return $sent;
 }
 
 /**

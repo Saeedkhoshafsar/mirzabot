@@ -687,7 +687,7 @@ if ($text == "/start" || $datain == "start" || $text == "start") {
     return;
 } elseif (
     $datain === 'shoplist' || $text === '/shop' || $datain === 'shopcart' || $text === '/cart'
-    || preg_match('/^shop(view|buy|coupon)_\d+$/', $datain)
+    || preg_match('/^shop(view|buy|coupon|gallery)_\d+$/', $datain)
     || preg_match('/^cart(add|inc|dec|del)_/', $datain)
     || in_array($datain, ['cartclear', 'cartcoupon', 'cartcheckout', 'cartnoop'], true)
 ) {

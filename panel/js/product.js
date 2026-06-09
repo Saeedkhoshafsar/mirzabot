@@ -1175,10 +1175,47 @@ window.openEditModal = function (p) {
     }
     renderAttrFields('edit', attrs || {});
 
-    // (دکمهٔ «مدیریت رسانه» حذف شد — رسانه اکنون از بخش ویژگی‌ها افزوده می‌شود.)
+    // Render the current main-product media gallery (view + delete). New uploads
+    // go through the dropzone (#editMediaInput) which posts media[] on save.
+    renderEditMediaGallery(p);
 
     openModal('editModal');
 };
+
+// Fill #edit_media_gallery with the product's existing main media, each with a
+// delete link. Media is provided on the product row as p._media (see product.php).
+function renderEditMediaGallery(p) {
+    var box = document.getElementById('edit_media_gallery');
+    if (!box) return;
+    box.innerHTML = '';
+    var media = (p && p._media) || [];
+    if (!media.length) {
+        box.innerHTML = '<div style="grid-column:1/-1;color:var(--mute);font-size:.74rem;padding:6px 2px">هنوز تصویر اصلی ندارد.</div>';
+        return;
+    }
+    var csrfEl = document.querySelector('#editModal input[name="_csrf"]');
+    var csrf = csrfEl ? encodeURIComponent(csrfEl.value) : '';
+    media.forEach(function (m) {
+        var src = '../' + m.file_path;
+        var cell = document.createElement('div');
+        cell.style.cssText = 'position:relative;border:1px solid var(--bd);border-radius:8px;overflow:hidden;background:#0003;aspect-ratio:1/1';
+        var inner = '';
+        if (m.type === 'image') {
+            inner = '<img src="' + src + '" alt="" style="width:100%;height:100%;object-fit:cover">';
+        } else if (m.type === 'video') {
+            inner = '<video src="' + src + '" style="width:100%;height:100%;object-fit:cover" muted></video>';
+        } else {
+            inner = '<div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:.7rem;color:var(--mute)">' + (m.type || 'file') + '</div>';
+        }
+        var delUrl = 'product.php?delmedia=' + m.id + '&pid=' + (p.id || '') + '&_csrf=' + csrf;
+        inner += '<a href="' + delUrl + '" title="حذف" data-confirm="این تصویر حذف شود؟" '
+            + 'style="position:absolute;top:3px;left:3px;background:#dc2626;color:#fff;border-radius:6px;'
+            + 'width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:13px;'
+            + 'text-decoration:none;line-height:1">✕</a>';
+        cell.innerHTML = inner;
+        box.appendChild(cell);
+    });
+}
 
 // Wire a click/drag-drop file picker zone (used by the in-form image uploader).
 function wireDropZone(zoneId, inputId, pickedId) {
@@ -1247,4 +1284,5 @@ function wireDropZone(zoneId, inputId, pickedId) {
 document.addEventListener('DOMContentLoaded', function () {
     renderAttrFields('add');
     wireDropZone('addDropZone', 'addMediaInput', 'addMediaPicked');
+    wireDropZone('editDropZone', 'editMediaInput', 'editMediaPicked');
 });
