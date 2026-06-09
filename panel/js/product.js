@@ -19,6 +19,28 @@ function buildRepeaterRow(fieldKey, idx, cols, row) {
         var cv = row[c.key];
         if (cv === undefined || cv === null) cv = '';
         var cName = 'attr[' + fieldKey + '][' + idx + '][' + c.key + ']';
+
+        if (c.type === 'image') {
+            // Per-variant image: file input (uploaded) + hidden keeps existing url.
+            // `media_variant[fieldKey][idx]` carries the uploaded file for this row.
+            var fName = 'media_variant[' + fieldKey + '][' + idx + ']';
+            // Stored variant images are relative to the project root (uploads/…);
+            // the panel lives in /panel/, so prefix ../ for display.
+            var thumbSrc = cv ? (/^https?:|^\//.test(cv) ? cv : '../' + cv) : '';
+            var thumb = cv
+                ? '<img src="' + escapeHtml(thumbSrc) + '" class="rep-img-thumb" alt="">'
+                : '<span class="rep-img-empty">بدون تصویر</span>';
+            cells += '<td data-col="' + escapeHtml(c.label) + '" class="rep-img-cell">' +
+                '<input type="hidden" name="' + cName + '" value="' + escapeHtml(cv) + '">' +
+                '<label class="rep-img-pick">' +
+                thumb +
+                '<input type="file" name="' + fName + '" accept="image/*" ' +
+                'onchange="repeaterImagePreview(this)" style="display:none">' +
+                '<span class="rep-img-btn">انتخاب تصویر</span>' +
+                '</label></td>';
+            return;
+        }
+
         var cType = (c.type === 'number') ? 'number' : 'text';
         var stepAttr = (c.type === 'number') ? ' step="any"' : '';
         cells += '<td data-col="' + escapeHtml(c.label) + '">' +
@@ -30,6 +52,23 @@ function buildRepeaterRow(fieldKey, idx, cols, row) {
         'onclick="repeaterDelRow(this)">×</button></td>';
     return '<tr class="rep-row">' + cells + '</tr>';
 }
+
+// Show a thumbnail preview when a per-variant image file is chosen.
+window.repeaterImagePreview = function (input) {
+    var cell = input.closest('.rep-img-cell');
+    if (!cell || !input.files || !input.files.length) return;
+    var file = input.files[0];
+    var url = URL.createObjectURL(file);
+    var img = cell.querySelector('.rep-img-thumb');
+    var empty = cell.querySelector('.rep-img-empty');
+    if (!img) {
+        img = document.createElement('img');
+        img.className = 'rep-img-thumb';
+        cell.querySelector('.rep-img-pick').insertBefore(img, cell.querySelector('.rep-img-pick').firstChild);
+    }
+    if (empty) empty.remove();
+    img.src = url;
+};
 
 // Render a full repeater field (a labelled table + "add row" button).
 function buildRepeaterField(fieldKey, def, rows) {
@@ -50,8 +89,9 @@ function buildRepeaterField(fieldKey, def, rows) {
     }
 
     var colsJson = encodeURIComponent(JSON.stringify(cols));
+    var showWhen = def.show_when ? ' data-show-when="' + escapeHtml(def.show_when) + '"' : '';
     var html = '<div class="field rep-field" data-fieldkey="' + escapeHtml(fieldKey) +
-        '" data-cols="' + colsJson + '">' +
+        '" data-cols="' + colsJson + '"' + showWhen + '>' +
         '<label>' + escapeHtml(def.label) + '</label>';
     if (def.hint) {
         html += '<div class="field-hint">' + escapeHtml(def.hint) + '</div>';
@@ -69,9 +109,14 @@ function repeaterReindex(field) {
     var rows = field.querySelectorAll('.rep-body .rep-row');
     rows.forEach(function (tr, i) {
         tr.querySelectorAll('input').forEach(function (inp) {
-            // name = attr[fieldKey][OLD][col]  → replace OLD index with i
+            // attr[fieldKey][OLD][col]  → replace OLD index with i
             inp.name = inp.name.replace(
                 /^(attr\[[^\]]+\])\[\d+\]/,
+                '$1[' + i + ']'
+            );
+            // media_variant[fieldKey][OLD] → media_variant[fieldKey][i]
+            inp.name = inp.name.replace(
+                /^(media_variant\[[^\]]+\])\[\d+\]/,
                 '$1[' + i + ']'
             );
         });
@@ -167,8 +212,16 @@ window.renderAttrFields = function (which, values) {
             return;
         }
 
+        // Carriers multi-select: pick from the enabled (API-backed) carriers.
+        if (f.type === 'carriers') {
+            box.insertAdjacentHTML('beforeend', buildCarriersField(f, val));
+            return;
+        }
+
         if (val === undefined || val === null) val = '';
-        var html = '<div class="field"><label>' + escapeHtml(f.label) + '</label>';
+        var html = '<div class="field"';
+        if (f.show_when) html += ' data-show-when="' + escapeHtml(f.show_when) + '"';
+        html += '><label>' + escapeHtml(f.label) + '</label>';
 
         if (f.type === 'textarea') {
             html += '<textarea name="' + name + '" class="textarea">' + escapeHtml(val) + '</textarea>';
@@ -178,7 +231,8 @@ window.renderAttrFields = function (which, values) {
             html += '<input type="hidden" name="' + name + '" value="0">';
             html += '<label style="display:flex;align-items:center;gap:8px;font-weight:400">' +
                 '<input type="checkbox" value="1" ' + checked +
-                ' onchange="this.previousElementSibling.value=this.checked?1:0"> بله</label>';
+                ' data-bool-key="' + escapeHtml(f.key) + '"' +
+                ' onchange="this.previousElementSibling.value=this.checked?1:0;applyShowWhen(this.closest(\'.modal-body\')||document)"> بله</label>';
         } else if (f.type === 'select') {
             html += '<select name="' + name + '" class="select">';
             var opts = f.options || {};
@@ -199,6 +253,57 @@ window.renderAttrFields = function (which, values) {
         }
         html += '</div>';
         box.insertAdjacentHTML('beforeend', html);
+    });
+
+    // Apply conditional visibility (e.g. variants table only when "has_variants").
+    applyShowWhen(box);
+};
+
+// Build a checkbox multi-select of the merchant's enabled shipping carriers.
+function buildCarriersField(f, val) {
+    var carriers = window.SHIPPING_CARRIERS || {};
+    var selected = {};
+    // val may be an array, an object map, or a CSV string.
+    if (Array.isArray(val)) {
+        val.forEach(function (v) { selected[String(v)] = true; });
+    } else if (val && typeof val === 'object') {
+        Object.keys(val).forEach(function (k) { if (val[k]) selected[String(k)] = true; });
+    } else if (typeof val === 'string' && val) {
+        val.split(',').forEach(function (v) { selected[v.trim()] = true; });
+    }
+
+    var html = '<div class="field"><label>' + escapeHtml(f.label) + '</label>';
+    if (f.hint) html += '<div class="field-hint">' + escapeHtml(f.hint) + '</div>';
+    var keys = Object.keys(carriers);
+    if (!keys.length) {
+        html += '<div class="cat-empty" style="color:var(--mute);font-size:13px">' +
+            'هنوز شرکت پستی فعالی ندارید. ابتدا در بخش «ارسال» شرکت‌های پستی را فعال کنید.</div>';
+    } else {
+        html += '<div class="cat-picker">';
+        keys.forEach(function (code) {
+            var ck = selected[code] ? ' checked' : '';
+            html += '<label class="cat-chip"><input type="checkbox" name="attr[' + escapeHtml(f.key) +
+                '][]" value="' + escapeHtml(code) + '"' + ck + '> <span>' +
+                escapeHtml(carriers[code]) + '</span></label>';
+        });
+        html += '</div>';
+    }
+    html += '</div>';
+    return html;
+}
+
+// Show/hide any [data-show-when="boolKey"] block based on its gating checkbox,
+// and disable inputs inside hidden blocks so they don't submit stale values.
+window.applyShowWhen = function (scope) {
+    scope = scope || document;
+    scope.querySelectorAll('[data-show-when]').forEach(function (el) {
+        var key = el.getAttribute('data-show-when');
+        var gate = scope.querySelector('input[type=checkbox][data-bool-key="' + key + '"]');
+        var on = gate ? gate.checked : false;
+        el.style.display = on ? '' : 'none';
+        el.querySelectorAll('input,select,textarea').forEach(function (inp) {
+            inp.disabled = !on;
+        });
     });
 };
 
@@ -321,12 +426,35 @@ function wireDropZone(zoneId, inputId, pickedId) {
 
     function showFiles(files) {
         if (!picked) return;
-        if (!files || !files.length) { picked.textContent = ''; return; }
-        var names = [];
-        for (var i = 0; i < files.length && i < 5; i++) names.push(files[i].name);
-        var label = files.length + ' فایل انتخاب شد: ' + names.join('، ');
-        if (files.length > 5) label += ' …';
-        picked.textContent = label;
+        picked.innerHTML = '';
+        if (!files || !files.length) return;
+        var head = document.createElement('div');
+        head.className = 'media-pick-head';
+        head.textContent = '✓ ' + files.length + ' فایل آمادهٔ آپلود است (پس از ذخیرهٔ محصول بارگذاری می‌شود)';
+        picked.appendChild(head);
+        var grid = document.createElement('div');
+        grid.className = 'media-pick-grid';
+        for (var i = 0; i < files.length && i < 12; i++) {
+            var f = files[i];
+            var cell = document.createElement('div');
+            cell.className = 'media-pick-cell';
+            if (/^image\//.test(f.type)) {
+                var img = document.createElement('img');
+                img.src = URL.createObjectURL(f);
+                cell.appendChild(img);
+            } else {
+                var ic = document.createElement('div');
+                ic.className = 'media-pick-ic';
+                ic.textContent = /^video\//.test(f.type) ? '🎬' : (/^audio\//.test(f.type) ? '🎵' : '📄');
+                cell.appendChild(ic);
+            }
+            var nm = document.createElement('div');
+            nm.className = 'media-pick-name';
+            nm.textContent = f.name;
+            cell.appendChild(nm);
+            grid.appendChild(cell);
+        }
+        picked.appendChild(grid);
     }
     input.addEventListener('change', function () { showFiles(input.files); });
 

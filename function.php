@@ -1870,34 +1870,39 @@ function product_types()
             ],
             'fields' => [
                 ['key' => 'brand',         'label' => 'برند', 'type' => 'text', 'hint' => 'اختیاری'],
-                ['key' => 'sku',           'label' => 'کد انبار (SKU)', 'type' => 'text', 'hint' => 'اختیاری'],
                 ['key' => 'warranty',      'label' => 'گارانتی', 'type' => 'text', 'hint' => 'مثلاً: ۱۸ ماه'],
-                ['key' => 'stock',         'label' => 'موجودی کل (اگر واریانت ندارد)', 'type' => 'number', 'hint' => 'اگر از واریانت‌ها استفاده می‌کنید، خالی بگذارید'],
                 ['key' => 'weight',        'label' => 'وزن (گرم)', 'type' => 'number', 'hint' => 'برای محاسبهٔ هزینهٔ ارسال'],
                 ['key' => 'needs_address', 'label' => 'نیاز به آدرس پستی', 'type' => 'bool', 'hint' => 'دریافت آدرس هنگام خرید'],
-                // Variants: each color/size combination has its own code, stock & price diff.
-                // "پس‌کد" / variant code (e.g. 2345-1, 2345-2) is OPTIONAL — leave blank if the
-                // product has no separate codes per variant.
+                // Single-stock fields (used when the product has NO variants/پس‌کد).
+                ['key' => 'sku',           'label' => 'کد انبار (SKU)', 'type' => 'text', 'hint' => 'اختیاری — فقط وقتی پس‌کد/تنوع ندارید'],
+                ['key' => 'stock',         'label' => 'موجودی کل', 'type' => 'number', 'hint' => 'فقط وقتی پس‌کد/تنوع ندارید'],
+
+                // Gate: enabling "پس‌کد/تنوع" reveals the variants table. When this
+                // is checked the product is treated as multi-variant (e.g. several
+                // colors), each variant carries its own code, stock, price & image,
+                // and the single SKU/stock above are ignored.
+                ['key' => 'has_variants', 'label' => 'این محصول پس‌کد/تنوع دارد (چند رنگ/سایز)', 'type' => 'bool',
+                 'hint' => 'با تیک‌زدن، جدول تنوع فعال می‌شود و می‌توانید برای هر رنگ پس‌کد، موجودی، قیمت و تصویر جدا ثبت کنید.'],
+
+                // Variants: shown only when has_variants is checked (data-show-when).
+                // Each row: پس‌کد, color, size, stock, price diff, and its own image.
                 ['key' => 'variants', 'label' => 'تنوع محصول (رنگ/سایز/پس‌کد)', 'type' => 'repeater',
-                 'hint' => 'اختیاری: برای هر رنگ/سایز یک ردیف بسازید. اگر هر تنوع پس‌کد جدا دارد (مثلاً ۲۳۴۵-۱، ۲۳۴۵-۲) در ستون «پس‌کد» وارد کنید؛ در غیر این صورت خالی بگذارید.',
+                 'show_when' => 'has_variants',
+                 'hint' => 'برای هر رنگ/سایز یک ردیف بسازید. پس‌کد مثل ۲۳۴۵-۱، ۲۳۴۵-۲. برای هر ردیف می‌توانید یک تصویر مجزا آپلود کنید.',
                  'columns' => [
-                    ['key' => 'variant_code', 'label' => 'پس‌کد (اختیاری)', 'type' => 'text'],
+                    ['key' => 'variant_code', 'label' => 'پس‌کد', 'type' => 'text'],
                     ['key' => 'color',      'label' => 'رنگ',           'type' => 'text'],
                     ['key' => 'size',       'label' => 'سایز',          'type' => 'text'],
-                    ['key' => 'sku',        'label' => 'کد انبار (SKU)', 'type' => 'text'],
                     ['key' => 'stock',      'label' => 'موجودی',         'type' => 'number'],
                     ['key' => 'price_diff', 'label' => 'اختلاف قیمت (+/−)', 'type' => 'number'],
+                    ['key' => 'image',      'label' => 'تصویر این رنگ',   'type' => 'image'],
                  ],
                 ],
-                // Shipping methods: post / tipax / courier / pickup, each with cost & ETA.
-                ['key' => 'shipping_methods', 'label' => 'روش‌های ارسال', 'type' => 'repeater',
-                 'hint' => 'مثلاً پست پیشتاز، تیپاکس، پیک، تحویل حضوری — هزینه و زمان هرکدام جداگانه.',
-                 'columns' => [
-                    ['key' => 'name',  'label' => 'نام روش (پست/تیپاکس/پیک)', 'type' => 'text'],
-                    ['key' => 'price', 'label' => 'هزینهٔ ارسال', 'type' => 'number'],
-                    ['key' => 'days',  'label' => 'زمان تقریبی (روز)', 'type' => 'text'],
-                 ],
-                ],
+
+                // Carriers: pick from the merchant's enabled (API-backed) carriers
+                // instead of typing a company name. Customer chooses one at checkout.
+                ['key' => 'carriers', 'label' => 'شرکت‌های پستی مجاز برای این محصول', 'type' => 'carriers',
+                 'hint' => 'از شرکت‌های پستی فعال (تنظیم‌شده در بخش ارسال) یک یا چند مورد را انتخاب کنید؛ مشتری هنگام خرید یکی را برمی‌گزیند.'],
             ],
         ],
         'digital_file' => [
@@ -1975,7 +1980,7 @@ function product_attr($productOrJson, $key, $default = null)
  * Persist the product_type + attributes JSON for a product row.
  * Validates the type and keeps only fields declared for that type.
  */
-function set_product_type($product_id, $type, array $attributes = [])
+function set_product_type($product_id, $type, array $attributes = [], array $keepRows = [])
 {
     global $pdo;
     if (!isset($pdo)) {
@@ -2007,8 +2012,11 @@ function set_product_type($product_id, $type, array $attributes = [])
             foreach (($def['columns'] ?? []) as $c) {
                 $colKeys[$c['key']] = true;
             }
+            // Rows that have a pending image upload for this field/index must be
+            // kept even if their text cells are empty (image-only variants).
+            $keepIdx = isset($keepRows[$k]) && is_array($keepRows[$k]) ? $keepRows[$k] : [];
             $rows = [];
-            foreach ($v as $row) {
+            foreach ($v as $idx => $row) {
                 if (!is_array($row)) {
                     continue;
                 }
@@ -2024,12 +2032,14 @@ function set_product_type($product_id, $type, array $attributes = [])
                         $hasValue = true;
                     }
                 }
-                if ($hasValue) {
-                    $rows[] = $cleanRow;
+                if ($hasValue || in_array((string) $idx, $keepIdx, true)) {
+                    // Preserve the original submitted index so per-row uploaded
+                    // images (media_variant[k][idx]) line up with this row.
+                    $rows[$idx] = $cleanRow;
                 }
             }
             if (!empty($rows)) {
-                $clean[$k] = array_values($rows);
+                $clean[$k] = $rows; // keep original keys (do NOT re-index)
             }
             continue;
         }
@@ -2037,6 +2047,22 @@ function set_product_type($product_id, $type, array $attributes = [])
         if ($ftype === 'bool') {
             // Normalize checkbox-style values to 1/0.
             $clean[$k] = ($v === '1' || $v === 1 || $v === true || $v === 'on') ? 1 : 0;
+            continue;
+        }
+
+        if ($ftype === 'carriers') {
+            // Multi-select of carrier codes; keep only known, non-empty codes.
+            $valid = function_exists('shipping_carriers') ? shipping_carriers() : [];
+            $codes = [];
+            foreach ((array) $v as $code) {
+                $code = is_string($code) ? trim($code) : '';
+                if ($code !== '' && (empty($valid) || isset($valid[$code])) && !in_array($code, $codes, true)) {
+                    $codes[] = $code;
+                }
+            }
+            if (!empty($codes)) {
+                $clean[$k] = array_values($codes);
+            }
             continue;
         }
 
@@ -2515,6 +2541,105 @@ function product_media_handle_upload($pid, $files)
         }
     }
     return $result;
+}
+
+/**
+ * Save a single uploaded variant image (one $_FILES slot) and return its
+ * relative URL (e.g. "uploads/products/variants/12_ab.jpg"), or null on failure.
+ * Only images are accepted. Used for per-color/per-پس‌کد variant pictures.
+ */
+function product_variant_image_save($pid, $tmp, $origName, $size, $error)
+{
+    $pid = (int) $pid;
+    if ($pid <= 0 || ($error ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        return null;
+    }
+    $size = (int) $size;
+    if ($size <= 0 || $size > 25 * 1024 * 1024) {
+        return null;
+    }
+    $detect = product_media_detect($tmp, $origName);
+    if ($detect === null) {
+        return null;
+    }
+    [$mediaType, $ext] = $detect;
+    if ($mediaType !== 'photo') {
+        return null; // variants only accept images
+    }
+    $dirAbs = __DIR__ . '/uploads/products/variants';
+    $relPrefix = 'uploads/products/variants';
+    if (!is_dir($dirAbs)) {
+        @mkdir($dirAbs, 0755, true);
+    }
+    $fname = $pid . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
+    $dest = $dirAbs . '/' . $fname;
+    if (@move_uploaded_file($tmp, $dest)) {
+        @chmod($dest, 0644);
+        return $relPrefix . '/' . $fname;
+    }
+    return null;
+}
+
+/**
+ * After set_product_type(), merge any uploaded per-variant images into the
+ * product's stored attributes. $variantFiles is the normalised
+ * $_FILES['media_variant'] array (shape: [fieldKey][idx] => file fields).
+ * Returns the number of images saved.
+ */
+function product_apply_variant_images($pid, $variantFiles)
+{
+    global $pdo;
+    $pid = (int) $pid;
+    if ($pid <= 0 || !is_array($variantFiles) || !isset($pdo)) {
+        return 0;
+    }
+    // Load current attributes.
+    try {
+        $stmt = $pdo->prepare("SELECT attributes FROM product WHERE id = ?");
+        $stmt->execute([$pid]);
+        $raw = $stmt->fetchColumn();
+    } catch (Exception $e) {
+        return 0;
+    }
+    $attrs = $raw ? json_decode((string) $raw, true) : [];
+    if (!is_array($attrs)) {
+        $attrs = [];
+    }
+    $saved = 0;
+    foreach ($variantFiles as $fieldKey => $rows) {
+        if (!is_array($rows) || !isset($attrs[$fieldKey]) || !is_array($attrs[$fieldKey])) {
+            continue;
+        }
+        // $_FILES nested layout: media_variant[fieldKey][idx] →
+        //   $variantFiles[fieldKey] has parallel arrays name/tmp_name/size/error keyed by idx.
+        $names = $rows['name'] ?? [];
+        $tmps  = $rows['tmp_name'] ?? [];
+        $sizes = $rows['size'] ?? [];
+        $errs  = $rows['error'] ?? [];
+        if (!is_array($names)) {
+            continue;
+        }
+        foreach ($names as $idx => $nm) {
+            if (($errs[$idx] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+                continue;
+            }
+            $url = product_variant_image_save($pid, $tmps[$idx] ?? '', $nm, $sizes[$idx] ?? 0, $errs[$idx] ?? 0);
+            if ($url && isset($attrs[$fieldKey][$idx]) && is_array($attrs[$fieldKey][$idx])) {
+                $attrs[$fieldKey][$idx]['image'] = $url;
+                $saved++;
+            }
+        }
+    }
+    if ($saved > 0) {
+        try {
+            $json = json_encode($attrs, JSON_UNESCAPED_UNICODE);
+            $stmt = $pdo->prepare("UPDATE product SET attributes = ? WHERE id = ?");
+            $stmt->execute([$json, $pid]);
+        } catch (Exception $e) {
+            error_log("product_apply_variant_images error: " . $e->getMessage());
+        }
+    }
+    return $saved;
 }
 
 // ===========================================================================
@@ -3616,6 +3741,50 @@ function shop_cart_count($from_id)
 /**
  * Unit price for a product, including a variant's price_diff when applicable.
  */
+/**
+ * Stable identifier for one product variant row. Prefers the "پس‌کد"
+ * (variant_code), then legacy SKU, then a color/size combination. Used as the
+ * key when matching a customer's chosen variant against the stored rows.
+ */
+function product_variant_key($v)
+{
+    if (!is_array($v)) {
+        return '';
+    }
+    $code = trim((string) ($v['variant_code'] ?? ''));
+    if ($code !== '') {
+        return $code;
+    }
+    $sku = trim((string) ($v['sku'] ?? ''));
+    if ($sku !== '') {
+        return $sku;
+    }
+    return trim((string) ($v['color'] ?? '') . ' ' . (string) ($v['size'] ?? ''));
+}
+
+/** Human-readable label for a variant row (for buttons / order summaries). */
+function product_variant_label($v)
+{
+    if (!is_array($v)) {
+        return '';
+    }
+    $parts = [];
+    foreach (['color', 'size'] as $k) {
+        $val = trim((string) ($v[$k] ?? ''));
+        if ($val !== '') {
+            $parts[] = $val;
+        }
+    }
+    $label = implode(' / ', $parts);
+    $code = trim((string) ($v['variant_code'] ?? ''));
+    if ($label === '') {
+        $label = $code !== '' ? $code : product_variant_key($v);
+    } elseif ($code !== '') {
+        $label .= ' (' . $code . ')';
+    }
+    return $label;
+}
+
 function shop_line_unit_price($product, $variant = null)
 {
     $base = (int) preg_replace('/[^\d]/', '', (string) ($product['price_product'] ?? '0'));
@@ -3623,10 +3792,7 @@ function shop_line_unit_price($product, $variant = null)
         $variants = product_attr($product, 'variants', null);
         if (is_array($variants)) {
             foreach ($variants as $v) {
-                $vk = trim((string) ($v['sku'] ?? '')) !== ''
-                    ? (string) $v['sku']
-                    : trim((string) ($v['color'] ?? '') . ' ' . (string) ($v['size'] ?? ''));
-                if ($vk === (string) $variant) {
+                if (product_variant_key($v) === (string) $variant) {
                     $base += (int) preg_replace('/[^\-\d]/', '', (string) ($v['price_diff'] ?? '0'));
                     break;
                 }
@@ -4542,6 +4708,36 @@ function shipping_carriers()
 }
 
 /**
+ * Carriers the merchant has actually enabled in their shipping config, as a
+ * flat code=>name map. Used by the product form so the admin picks from the
+ * configured (API-backed) carriers instead of typing a company name by hand.
+ * Falls back to the full master list when nothing is configured yet.
+ */
+function enabled_shipping_carriers($bot_id = null)
+{
+    $all = shipping_carriers();
+    $out = [];
+    try {
+        $cfg = function_exists('get_shipping_config') ? get_shipping_config($bot_id) : [];
+        $carriers = is_array($cfg['carriers'] ?? null) ? $cfg['carriers'] : [];
+        foreach ($carriers as $code => $c) {
+            if (!empty($c['enabled']) && isset($all[$code])) {
+                $out[$code] = $all[$code]['name'];
+            }
+        }
+    } catch (Exception $e) {
+        error_log("enabled_shipping_carriers error: " . $e->getMessage());
+    }
+    // Nothing configured yet -> offer the whole master list so the form is still usable.
+    if (empty($out)) {
+        foreach ($all as $code => $c) {
+            $out[$code] = $c['name'];
+        }
+    }
+    return $out;
+}
+
+/**
  * Read the shipping config JSON from setting (main bot) or botsaz.setting
  * (child bot). Always returns an array with normalised keys:
  *   carriers => [ carrier_code => ['enabled'=>bool, 'cost'=>int, 'creds'=>[...]] ]
@@ -5210,9 +5406,7 @@ function product_decrement_stock($product_id, $qty = 1, $variantKey = null)
 
     if ($variantKey !== null && !empty($attrs['variants']) && is_array($attrs['variants'])) {
         foreach ($attrs['variants'] as &$v) {
-            $vk = trim((string) ($v['sku'] ?? '')) !== ''
-                ? (string) $v['sku']
-                : trim(((string) ($v['color'] ?? '')) . '/' . ((string) ($v['size'] ?? '')), '/');
+            $vk = product_variant_key($v);
             if ($vk === (string) $variantKey && isset($v['stock']) && $v['stock'] !== '') {
                 $v['stock'] = max(0, (int) $v['stock'] - (int) $qty);
                 $changed = true;

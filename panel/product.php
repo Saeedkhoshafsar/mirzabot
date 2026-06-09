@@ -3,6 +3,32 @@ require_once __DIR__ . '/inc/config.php';
 require_once __DIR__ . '/inc/icons.php';
 require_auth();
 
+/*
+ * Build a "keepRows" map from $_FILES['media_variant'] so set_product_type()
+ * does not drop variant rows that only carry an uploaded image (no text yet).
+ * Shape returned: [ fieldKey => [ "idx", "idx", ... ] ]  (idx as strings).
+ */
+function product_variant_keep_rows()
+{
+    $keep = [];
+    $mv = $_FILES['media_variant'] ?? null;
+    if (!is_array($mv) || !isset($mv['name']) || !is_array($mv['name'])) {
+        return $keep;
+    }
+    foreach ($mv['name'] as $fieldKey => $rows) {
+        if (!is_array($rows)) {
+            continue;
+        }
+        foreach ($rows as $idx => $nm) {
+            $err = $mv['error'][$fieldKey][$idx] ?? UPLOAD_ERR_NO_FILE;
+            if ($err === UPLOAD_ERR_OK) {
+                $keep[$fieldKey][] = (string) $idx;
+            }
+        }
+    }
+    return $keep;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add') {
   csrf_check_post();
   $name = trim($_POST['name_product'] ?? '');
@@ -44,7 +70,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add')
     if ($newId) {
       $ptype = $_POST['product_type'] ?? 'vpn';
       $attrs = is_array($_POST['attr'] ?? null) ? $_POST['attr'] : [];
-      set_product_type($newId, $ptype, $attrs);
+      set_product_type($newId, $ptype, $attrs, product_variant_keep_rows());
+      // Attach per-variant (per-color/پس‌کد) images to their rows.
+      if (!empty($_FILES['media_variant']) && function_exists('product_apply_variant_images')) {
+        product_apply_variant_images($newId, $_FILES['media_variant']);
+      }
     }
 
     // Images uploaded directly in the add-product form (no separate step needed).
@@ -100,7 +130,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'edit'
       // Generic product type + attributes
       $ptype = $_POST['product_type'] ?? 'vpn';
       $attrs = is_array($_POST['attr'] ?? null) ? $_POST['attr'] : [];
-      set_product_type($pid, $ptype, $attrs);
+      set_product_type($pid, $ptype, $attrs, product_variant_keep_rows());
+      if (!empty($_FILES['media_variant']) && function_exists('product_apply_variant_images')) {
+        product_apply_variant_images($pid, $_FILES['media_variant']);
+      }
       flash('success', $textbotlang['panel']['productEdited']);
     } catch (Exception $e) {
       flash('error', $textbotlang['panel']['productErrorPrefix'] . $e->getMessage());
@@ -352,7 +385,7 @@ include __DIR__ . '/inc/layout_head.php';
       <h3><?= $textbotlang['panel']['productDetailTitle'] ?></h3>
       <button class="modal-x" onclick="closeModal('editModal')"><?= icon('close', 14) ?></button>
     </div>
-    <form method="POST">
+    <form method="POST" enctype="multipart/form-data">
       <div class="modal-body">
         <input type="hidden" name="_csrf" value="<?= csrf_token() ?>">
         <input type="hidden" name="action" value="edit">
@@ -449,15 +482,31 @@ include __DIR__ . '/inc/layout_head.php';
 <style>
   .field-hint { color: var(--mute); font-size: 12px; margin-top: 4px; }
   .rep-field .rep-wrap { overflow-x: auto; border: 1px solid var(--bd); border-radius: 10px; }
-  .rep-field .rep-table { width: 100%; border-collapse: collapse; min-width: 420px; }
+  .rep-field .rep-table { width: 100%; border-collapse: collapse; min-width: 640px; }
   .rep-field .rep-table th,
-  .rep-field .rep-table td { padding: 6px; border-bottom: 1px solid var(--bd); text-align: right; font-size: 13px; }
+  .rep-field .rep-table td { padding: 6px; border-bottom: 1px solid var(--bd); text-align: right; font-size: 13px; vertical-align: middle; }
   .rep-field .rep-table th { color: var(--mute); font-weight: 600; white-space: nowrap; }
   .rep-field .rep-table tr:last-child td { border-bottom: none; }
-  .rep-field .rep-table .input { padding: 6px 8px; }
+  /* Inputs fill their cell so typed text (رنگ/سایز) is never clipped (Audit). */
+  .rep-field .rep-table td .input { width: 100%; box-sizing: border-box; padding: 7px 9px; min-width: 90px; }
+  .rep-field .rep-table th:nth-child(1), .rep-field .rep-table td:nth-child(1) { min-width: 110px; }
   .rep-field .rep-actions { width: 38px; text-align: center; }
   .rep-field .rep-del { padding: 2px 10px; line-height: 1; font-size: 16px; }
   .rep-field .rep-add { margin-top: 8px; }
+  /* Per-variant image cell */
+  .rep-img-cell { width: 96px; }
+  .rep-img-pick { display: inline-flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer; }
+  .rep-img-thumb { width: 54px; height: 54px; object-fit: cover; border-radius: 8px; border: 1px solid var(--bd); display: block; }
+  .rep-img-empty { display: inline-flex; align-items: center; justify-content: center; width: 54px; height: 54px; border: 1px dashed var(--bd); border-radius: 8px; color: var(--mute); font-size: 10px; text-align: center; }
+  .rep-img-btn { font-size: 11px; color: var(--accent); font-weight: 700; }
+  /* Main media uploader preview */
+  #addMediaPicked { width: 100%; }
+  .media-pick-head { color: #16a34a; font-weight: 700; font-size: .8rem; margin-top: 4px; }
+  .media-pick-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; justify-content: center; }
+  .media-pick-cell { width: 84px; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  .media-pick-cell img { width: 84px; height: 84px; object-fit: cover; border-radius: 10px; border: 1px solid var(--bd); }
+  .media-pick-ic { width: 84px; height: 84px; display: flex; align-items: center; justify-content: center; font-size: 30px; border-radius: 10px; border: 1px solid var(--bd); background: var(--sf2); }
+  .media-pick-name { font-size: 10px; color: var(--mute); max-width: 84px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cat-picker { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px; border: 1px solid var(--bd); border-radius: 10px; min-height: 42px; align-content: flex-start; }
   .cat-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border: 1px solid var(--bd); border-radius: 999px; cursor: pointer; font-size: 13px; user-select: none; transition: background .15s, border-color .15s; }
   .cat-chip:hover { border-color: #3b82f6; }
@@ -467,6 +516,8 @@ include __DIR__ . '/inc/layout_head.php';
 <script>
   // Product types + their attribute field definitions (from product_types()).
   window.PRODUCT_TYPES = <?= json_encode(product_types(), JSON_UNESCAPED_UNICODE) ?>;
+  // Enabled (API-backed) shipping carriers the admin can attach to a product.
+  window.SHIPPING_CARRIERS = <?= json_encode(function_exists('enabled_shipping_carriers') ? enabled_shipping_carriers() : [], JSON_UNESCAPED_UNICODE) ?>;
 </script>
 <script src="js/product.js"></script>
 <script>
