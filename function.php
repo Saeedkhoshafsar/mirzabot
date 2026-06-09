@@ -3386,7 +3386,10 @@ function variant_normalize_columns($cols)
         return [];
     }
     $allowed = ['text', 'number', 'textarea', 'url', 'date', 'color', 'bool', 'select', 'image', 'file'];
-    $reserved = ['stock', 'price_diff']; // appended automatically, never user-defined
+    // price_diff is fully automatic and never user-defined. stock is allowed as a
+    // *seeded* default column (موجودی) so it can be a removable chip whose per-row
+    // value still feeds product_stock(); it is de-duplicated like any other key.
+    $reserved = ['price_diff'];
     $formatsCat = variant_file_formats();
     $out = [];
     $seen = [];
@@ -3505,16 +3508,25 @@ function variant_clean_formats($formats, $catalogue = null)
  */
 function variant_columns_with_builtins(array $customCols)
 {
+    // stock & price_diff may be seeded as removable default columns (so the
+    // seller sees «موجودی»/«کد انبار» chips the instant تنوع is enabled). When a
+    // builtin key is already present we keep it in place and skip re-appending,
+    // so columns never duplicate. (Mirrors variantColumnsWithBuiltins() in JS.)
     $cols = [];
-    $reserved = ['stock', 'price_diff'];
+    $seen = [];
     foreach ($customCols as $c) {
-        if (isset($c['key']) && in_array($c['key'], $reserved, true)) {
+        if (!isset($c['key']) || isset($seen[$c['key']])) {
             continue;
         }
+        $seen[$c['key']] = true;
         $cols[] = $c;
     }
-    $cols[] = ['key' => 'stock',      'label' => 'موجودی',          'type' => 'number'];
-    $cols[] = ['key' => 'price_diff', 'label' => 'اختلاف قیمت (+/−)', 'type' => 'number'];
+    if (!isset($seen['stock'])) {
+        $cols[] = ['key' => 'stock',      'label' => 'موجودی',          'type' => 'number'];
+    }
+    if (!isset($seen['price_diff'])) {
+        $cols[] = ['key' => 'price_diff', 'label' => 'اختلاف قیمت (+/−)', 'type' => 'number'];
+    }
     return $cols;
 }
 
@@ -4367,9 +4379,10 @@ function shop_product_view_data($product)
             continue;
         }
         $media[] = [
-            'type' => $m['media_type'] ?? 'image',
-            'ref'  => $ref,
-            'url'  => $url, // public URL (used by the preview to actually show it)
+            'type'      => $m['media_type'] ?? 'image',
+            'ref'       => $ref,
+            'url'       => $url, // public URL (bot uses file_id; this is the fallback)
+            'file_path' => ltrim((string) $m['file_path'], '/'), // raw stored path (panel preview serves it relatively)
         ];
     }
 
@@ -6230,6 +6243,72 @@ function shop_render_my_orders($from_id)
 // attributes.variants[].stock. A stock of '' / null means "unlimited" (the
 // VPN flow and digital/serial/service products are never gated by this).
 // ===========================================================================
+
+/**
+ * Resolve the "code" to show for a product in the panel list.
+ * Prefers the seller's کد انبار (SKU) whenever it carries any text — whether the
+ * SKU field is enabled or disabled — over the auto-generated, meaningless
+ * code_product. The SKU may be a single attribute (no variants) OR supplied
+ * per-variant; the first non-empty variant SKU is used when there is no
+ * product-level SKU. Returns an array: ['code' => string, 'is_sku' => bool].
+ */
+function product_display_code($product)
+{
+    $fallback = (string) ($product['code_product'] ?? '');
+    $attrs = function_exists('product_attributes') ? product_attributes($product) : [];
+
+    // 1) product-level SKU (single-stock products).
+    if (isset($attrs['sku']) && trim((string) $attrs['sku']) !== '') {
+        return ['code' => trim((string) $attrs['sku']), 'is_sku' => true];
+    }
+
+    // 2) first non-empty per-variant SKU (when تنوع is enabled).
+    if (!empty($attrs['variants']) && is_array($attrs['variants'])) {
+        foreach ($attrs['variants'] as $v) {
+            if (is_array($v) && isset($v['sku']) && trim((string) $v['sku']) !== '') {
+                return ['code' => trim((string) $v['sku']), 'is_sku' => true];
+            }
+        }
+    }
+
+    return ['code' => $fallback, 'is_sku' => false];
+}
+
+/**
+ * Count of "پس‌کد"s (post-codes) a product carries.
+ *
+ * Concept: one product row has a single کد (code), but when تنوع/ویژگی is
+ * enabled each variant row behaves like a separate sellable item — i.e. one
+ * code with several post-codes. This returns the number of variant rows; a
+ * product without variants effectively has a single post-code (returns 1).
+ */
+function product_variant_count($product)
+{
+    $attrs = function_exists('product_attributes') ? product_attributes($product) : [];
+
+    $hv = $attrs['has_variants'] ?? null;
+    $hasVariantsOn = ($hv === '1' || $hv === 1 || $hv === true || $hv === 'on');
+
+    if (!empty($attrs['variants']) && is_array($attrs['variants'])) {
+        $count = 0;
+        foreach ($attrs['variants'] as $v) {
+            // Skip blank rows (no key carries a non-empty value).
+            if (is_array($v)) {
+                $hasValue = false;
+                foreach ($v as $val) {
+                    if (trim((string) $val) !== '') { $hasValue = true; break; }
+                }
+                if ($hasValue) { $count++; }
+            }
+        }
+        if ($count > 0) {
+            return $count;
+        }
+    }
+
+    // No usable variant rows: a single product = a single post-code.
+    return $hasVariantsOn ? 0 : 1;
+}
 
 /**
  * Whether stock tracking is meaningful for a product (physical with a numeric

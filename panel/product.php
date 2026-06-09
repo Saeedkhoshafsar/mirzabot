@@ -224,6 +224,7 @@ include __DIR__ . '/inc/layout_head.php';
             <th><?= $textbotlang['panel']['productColPanel'] ?></th>
             <th><?= $textbotlang['panel']['productColCategory'] ?></th>
             <th><?= $textbotlang['panel']['productColCode'] ?></th>
+            <th title="هر ردیف ویژگی/تنوع یک پس‌کد است؛ این عدد تعداد پس‌کدهای این کد محصول را نشان می‌دهد.">تعداد پس‌کد</th>
             <th><?= $textbotlang['panel']['productColActions'] ?></th>
           </tr>
         </thead>
@@ -243,7 +244,14 @@ include __DIR__ . '/inc/layout_head.php';
                 foreach ($pcats as $pc): ?><span class="tag tag-info"
                     style="margin:1px 2px;display:inline-block"><?= htmlspecialchars($pc) ?></span><?php endforeach;
               else: ?><span class="cf">—</span><?php endif; ?></td>
-              <td class="cm" style="font-size:.72rem"><?= htmlspecialchars($p['code_product'] ?? '') ?></td>
+              <td class="cm" style="font-size:.72rem"><?php
+                $dc = function_exists('product_display_code') ? product_display_code($p) : ['code' => $p['code_product'] ?? '', 'is_sku' => false];
+                echo htmlspecialchars($dc['code']);
+                if ($dc['is_sku']): ?> <span class="tag tag-ok" style="font-size:.62rem;padding:1px 5px">SKU</span><?php endif; ?></td>
+              <td class="cn cf"><?php
+                $pcCount = function_exists('product_variant_count') ? product_variant_count($p) : 1;
+                if ($pcCount > 1): ?><span class="tag tag-info" style="font-size:.68rem;padding:1px 7px"><?= (int) $pcCount ?></span><?php
+                else: ?><span class="cf"><?= (int) $pcCount ?></span><?php endif; ?></td>
               <td>
                 <div style="display:flex;gap:5px">
                   <button class="btn btn-ghost btn-sm btn-icon" title="<?= htmlspecialchars($textbotlang['panel']['productEditBtn']) ?>"
@@ -255,14 +263,7 @@ include __DIR__ . '/inc/layout_head.php';
                     onclick="openProductPreview(<?= (int) $p['id'] ?>, <?= htmlspecialchars(json_encode($p['name_product'] ?? ''), ENT_QUOTES) ?>)">
                     <?= icon('eye', 13) ?>
                   </button>
-                  <?php $mediaCount = function_exists('product_media_count') ? product_media_count((int) $p['id']) : 0; ?>
-                  <a href="product_media.php?pid=<?= (int) $p['id'] ?>"
-                    class="btn <?= $mediaCount > 0 ? 'btn-ghost' : 'btn-primary' ?> btn-sm"
-                    title="آپلود/مدیریت تصویر، ویدیو و صوت این محصول"
-                    style="position:relative;gap:4px">
-                    <?= icon('image', 13) ?>
-                    <span><?= $mediaCount > 0 ? 'تصاویر (' . $mediaCount . ')' : 'افزودن تصویر' ?></span>
-                  </a>
+                  <?php // تصاویر از داخل پنجرهٔ «ویرایش» مدیریت می‌شوند؛ دکمهٔ جداگانه حذف شد. ?>
                   <?php if (($p['product_type'] ?? 'vpn') === 'serial_code'):
                       $cc = product_codes_count((int) $p['id']); ?>
                     <a href="product_codes.php?pid=<?= (int) $p['id'] ?>"
@@ -486,11 +487,7 @@ include __DIR__ . '/inc/layout_head.php';
           </div>
 
           <div class="field full" id="edit_attr" style="display:flex;flex-direction:column;gap:12px"></div>
-          <div class="field full">
-            <a href="#" id="edit_media_link" class="btn btn-ghost" style="width:100%;justify-content:center">
-              <?= icon('image', 14) ?> مدیریت/افزودن تصویر، ویدیو و صوت این محصول
-            </a>
-          </div>
+          <?php /* دکمهٔ «مدیریت/افزودن تصویر، ویدیو و صوت» حذف شد: اکنون رسانه از بخش «ویژگی‌ها/تنوع» (حتی برای تک‌محصول بدون پس‌کد) قابل افزودن است. */ ?>
         </div>
       </div>
       <div class="modal-foot">
