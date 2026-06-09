@@ -100,13 +100,13 @@ include __DIR__ . '/inc/layout_head.php';
         <circle cx="155" cy="125" r="22" fill="var(--accent-s)" stroke="var(--accent)" stroke-width="2" />
         <path d="M147 125h16M155 117v16" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round" />
       </svg>
-      <p><?= $textbotlang['panel']['productColName'] ?></p>
+      <p><?= $textbotlang['panel']['productEmptyState'] ?></p>
       <button class="btn btn-primary" style="margin-top:14px" onclick="openModal('addModal')"><?= icon('plus', 14) ?>
-        <?= $textbotlang['panel']['productColVolume'] ?></button>
+        <?= $textbotlang['panel']['productEmptyAddBtn'] ?></button>
     </div>
   <?php else: ?>
     <div class="toolbar">
-      <div class="toolbar-title"><?= $textbotlang['panel']['productColTime'] ?> <small>(<?= count($products) ?>)</small></div>
+      <div class="toolbar-title"><?= $textbotlang['panel']['productListTitle'] ?> <small>(<?= count($products) ?>)</small></div>
       <div class="search-box" style="min-width:220px">
         <?= icon('search', 14) ?>
         <input type="text" placeholder="<?= htmlspecialchars($textbotlang['panel']['productSearchPlaceholder']) ?>" data-filter="prodTbl">
@@ -118,14 +118,14 @@ include __DIR__ . '/inc/layout_head.php';
         <thead>
           <tr>
             <th>#</th>
+            <th><?= $textbotlang['panel']['productColName'] ?></th>
             <th><?= $textbotlang['panel']['productColPrice'] ?></th>
+            <th><?= $textbotlang['panel']['productColVolume'] ?></th>
+            <th><?= $textbotlang['panel']['productColDuration'] ?></th>
+            <th><?= $textbotlang['panel']['productColPanel'] ?></th>
+            <th><?= $textbotlang['panel']['productColCategory'] ?></th>
+            <th><?= $textbotlang['panel']['productColCode'] ?></th>
             <th><?= $textbotlang['panel']['productColActions'] ?></th>
-            <th><?= $textbotlang['panel']['productNoProductFound'] ?></th>
-            <th><?= $textbotlang['panel']['productNoProductYet'] ?></th>
-            <th><?= $textbotlang['panel']['productAddProductTitle'] ?></th>
-            <th><?= $textbotlang['panel']['productEditProductTitle'] ?></th>
-            <th><?= $textbotlang['panel']['productFieldProductName'] ?></th>
-            <th><?= $textbotlang['panel']['productFieldVolumeGb'] ?></th>
           </tr>
         </thead>
         <tbody>
@@ -134,9 +134,9 @@ include __DIR__ . '/inc/layout_head.php';
             <tr>
               <td class="cf"><?= $i++ ?></td>
               <td class="cs"><?= htmlspecialchars($p['name_product'] ?? '') ?></td>
-              <td class="cn cs"><?= number_format((int) ($p['price_product'] ?? 0)) ?> <span class="cf"><?= $textbotlang['panel']['productFieldServiceDays'] ?></span></td>
+              <td class="cn cs"><?= number_format((int) ($p['price_product'] ?? 0)) ?> <span class="cf"><?= $textbotlang['panel']['productPriceUnit'] ?></span></td>
               <td class="cn"><?= htmlspecialchars($p['Volume_constraint'] ?? '—') ?> <span class="cf">GB</span></td>
-              <td class="cn"><?= htmlspecialchars($p['Service_time'] ?? '—') ?> <span class="cf"><?= $textbotlang['panel']['productFieldPriceToman'] ?></span></td>
+              <td class="cn"><?= htmlspecialchars($p['Service_time'] ?? '—') ?> <span class="cf"><?= $textbotlang['panel']['productDurationUnit'] ?></span></td>
               <td class="cf"><?= htmlspecialchars(trunc($p['Location'] ?? '—', 16)) ?></td>
               <td><?php if (!empty($p['category'])): ?><span
                     class="tag tag-info"><?= htmlspecialchars($p['category']) ?></span><?php else: ?><span
@@ -184,7 +184,7 @@ include __DIR__ . '/inc/layout_head.php';
 <div class="modal-veil" id="addModal">
   <div class="modal">
     <div class="modal-head">
-      <h3><?= $textbotlang['panel']['productFieldProductType'] ?></h3>
+      <h3><?= $textbotlang['panel']['productAddModalTitle'] ?></h3>
       <button class="modal-x" onclick="closeModal('addModal')"><?= icon('close', 14) ?></button>
     </div>
     <form method="POST">
@@ -193,29 +193,29 @@ include __DIR__ . '/inc/layout_head.php';
         <input type="hidden" name="action" value="add">
         <div class="form-grid">
           <div class="field full">
-            <label><?= $textbotlang['panel']['productFieldDescription'] ?></label>
+            <label><?= $textbotlang['panel']['productNameLabel'] ?></label>
             <input type="text" name="name_product" class="input" placeholder="<?= htmlspecialchars($textbotlang['panel']['productNameExample']) ?>" required>
           </div>
           <div class="field">
-            <label><?= $textbotlang['panel']['productSaveBtn'] ?></label>
+            <label><?= $textbotlang['panel']['productPriceLabel'] ?></label>
             <input type="number" name="price_product" class="input" placeholder="<?= htmlspecialchars($textbotlang['panel']['productZeroValue']) ?>" min="0">
           </div>
           <div class="field">
-            <label><?= $textbotlang['panel']['productVolumeGbSuffix'] ?></label>
+            <label><?= $textbotlang['panel']['productVolumeLabel'] ?></label>
             <input type="number" name="volume_product" class="input" placeholder="<?= htmlspecialchars($textbotlang['panel']['productFiftyValue']) ?>" min="0">
           </div>
           <div class="field">
-            <label><?= $textbotlang['panel']['productCancelBtn'] ?></label>
+            <label><?= $textbotlang['panel']['productDurationLabel'] ?></label>
             <input type="number" name="time_product" class="input" placeholder="<?= htmlspecialchars($textbotlang['panel']['productThirtyValue']) ?>" min="0">
           </div>
           <div class="field">
-            <label><?= $textbotlang['panel']['productFieldLocation'] ?></label>
+            <label><?= $textbotlang['panel']['productCategoryLabel'] ?></label>
             <input type="text" name="cetegory_product" class="input" placeholder="<?= htmlspecialchars($textbotlang['panel']['productTypeExample']) ?>">
           </div>
           <div class="field">
-            <label><?= $textbotlang['panel']['productFieldCategory'] ?></label>
+            <label><?= $textbotlang['panel']['productPanelLabel'] ?></label>
             <select name="namepanel" class="select">
-              <option value=""><?= $textbotlang['panel']['productFieldNote'] ?></option>
+              <option value=""><?= $textbotlang['panel']['productNotSelected'] ?></option>
               <?php foreach ($panels as $pl): ?>
                 <option value="<?= htmlspecialchars($pl['name_panel'] ?? $pl['id']) ?>">
                   <?= htmlspecialchars($pl['name_panel'] ?? $pl['id']) ?>
@@ -223,15 +223,15 @@ include __DIR__ . '/inc/layout_head.php';
             </select>
           </div>
           <div class="field">
-            <label><?= $textbotlang['panel']['productColId'] ?></label>
+            <label><?= $textbotlang['panel']['productTypeLabel'] ?></label>
             <select name="agent_product" class="select">
-              <option value="f"><?= $textbotlang['panel']['productColType'] ?></option>
-              <option value="n"><?= $textbotlang['panel']['productColLocation'] ?></option>
-              <option value="n2"><?= $textbotlang['panel']['productColCategory'] ?></option>
+              <option value="f"><?= $textbotlang['panel']['productTypeRegular'] ?></option>
+              <option value="n"><?= $textbotlang['panel']['productTypeAgent'] ?></option>
+              <option value="n2"><?= $textbotlang['panel']['productTypeAgentPro'] ?></option>
             </select>
           </div>
           <div class="field full">
-            <label><?= $textbotlang['panel']['productColDescription'] ?></label>
+            <label><?= $textbotlang['panel']['productNoteLabel'] ?></label>
             <input type="text" name="note_product" class="input" placeholder="<?= htmlspecialchars($textbotlang['panel']['productDescriptionOptional']) ?>">
           </div>
           <div class="field full">
@@ -257,8 +257,8 @@ include __DIR__ . '/inc/layout_head.php';
         </div>
       </div>
       <div class="modal-foot">
-        <button type="submit" class="btn btn-primary"><?= icon('plus', 13) ?> <?= $textbotlang['panel']['productColNote'] ?></button>
-        <button type="button" class="btn btn-ghost" onclick="closeModal('addModal')"><?= $textbotlang['panel']['productColCreatedAt'] ?></button>
+        <button type="submit" class="btn btn-primary"><?= icon('plus', 13) ?> <?= $textbotlang['panel']['productSaveSubmitBtn'] ?></button>
+        <button type="button" class="btn btn-ghost" onclick="closeModal('addModal')"><?= $textbotlang['panel']['productCancelModalBtn'] ?></button>
       </div>
     </form>
   </div>
@@ -285,7 +285,7 @@ include __DIR__ . '/inc/layout_head.php';
             <input type="number" name="price_product" id="edit_price" class="input" min="0">
           </div>
           <div class="field">
-            <label><?= $textbotlang['panel']['productVolumeGbSuffix'] ?></label>
+            <label><?= $textbotlang['panel']['productVolumeLabel'] ?></label>
             <input type="number" name="volume_product" id="edit_volume" class="input" min="0">
           </div>
           <div class="field">
