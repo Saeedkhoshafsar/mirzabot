@@ -105,6 +105,28 @@ if (!$mysqldumpMissing) {
 
 @unlink($backup_file_name . '.err');
 
+// ---------------------------------------------------------------------------
+// FALLBACK: if mysqldump failed (any non-zero exit, e.g. the infamous exit
+// code 7 when a MariaDB mysqldump talks to a MySQL 8.4 server), reproduce the
+// dump in pure PHP via PDO. This is client-agnostic and immune to the version
+// mismatch, so the nightly backup keeps working even on mixed setups.
+// ---------------------------------------------------------------------------
+$usedPhpFallback = false;
+if ($return_var !== 0 && function_exists('php_database_dump')) {
+    @unlink($backup_file_name);
+    $phpErr = '';
+    if (php_database_dump($backup_file_name, $phpErr)) {
+        $return_var = 0;          // success via PHP fallback
+        $usedPhpFallback = true;
+    } else {
+        // Keep the PHP failure reason so the Telegram message is informative.
+        if ($phpErr !== '') {
+            $dumpStderr = ($dumpStderr !== '' ? $dumpStderr . "\n" : '')
+                . 'PHP fallback: ' . $phpErr;
+        }
+    }
+}
+
 if ($return_var !== 0) {
     // Turn the raw error into a short, human-readable hint.
     $hint = '';
@@ -159,11 +181,16 @@ if ($return_var !== 0) {
     ]);
     @unlink($backup_file_name);
 } else {
+    $caption = $textbotlang['hardcoded']['backupDatabaseCaption'];
+    if (!empty($usedPhpFallback)) {
+        // Let the admin know mysqldump was bypassed (mixed MySQL/MariaDB setup).
+        $caption .= "\n\n♻️ (این بکاپ با روش جایگزین PHP گرفته شد چون mysqldump روی این سرور با خطا مواجه شد.)";
+    }
     telegram('sendDocument', [
         'chat_id' => $setting['Channel_Report'],
         'message_thread_id' => $reportbackup,
         'document' => new CURLFile($backup_file_name),
-        'caption' => $textbotlang['hardcoded']['backupDatabaseCaption'],
+        'caption' => $caption,
     ]);
     unlink($backup_file_name);
 }

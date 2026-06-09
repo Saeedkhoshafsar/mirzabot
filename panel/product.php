@@ -63,7 +63,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add')
     db_query(
       $pdo,
       "INSERT INTO product (name_product,code_product,price_product,Volume_constraint,Service_time,Location,agent,data_limit_reset,note,category,hide_panel,one_buy_status) VALUES (?,?,?,?,?,?,?,'no_reset',?,?,'{}','0')",
-      [$name, $code, (int) ($_POST['price_product'] ?? 0), (int) ($_POST['volume_product'] ?? 0), (int) ($_POST['time_product'] ?? 0), $_POST['namepanel'] ?? '', $_POST['agent_product'] ?? '', $_POST['note_product'] ?? '', $catCsv]
+      [$name, $code, money_int($_POST['price_product'] ?? 0), (int) ($_POST['volume_product'] ?? 0), (int) ($_POST['time_product'] ?? 0), $_POST['namepanel'] ?? '', $_POST['agent_product'] ?? '', $_POST['note_product'] ?? '', $catCsv]
     );
     // Generic product type + attributes (defaults to 'vpn' if unset).
     $newId = (int) $pdo->lastInsertId();
@@ -125,12 +125,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'edit'
       db_query(
         $pdo,
         "UPDATE product SET name_product=?,price_product=?,Volume_constraint=?,Service_time=?,Location=?,agent=?,note=?,category=? WHERE id=?",
-        [$name, (int) ($_POST['price_product'] ?? 0), (int) ($_POST['volume_product'] ?? 0), (int) ($_POST['time_product'] ?? 0), $_POST['namepanel'] ?? '', $_POST['agent_product'] ?? '', $_POST['note_product'] ?? '', $catCsv, $pid]
+        [$name, money_int($_POST['price_product'] ?? 0), (int) ($_POST['volume_product'] ?? 0), (int) ($_POST['time_product'] ?? 0), $_POST['namepanel'] ?? '', $_POST['agent_product'] ?? '', $_POST['note_product'] ?? '', $catCsv, $pid]
       );
       // Generic product type + attributes
       $ptype = $_POST['product_type'] ?? 'vpn';
       $attrs = is_array($_POST['attr'] ?? null) ? $_POST['attr'] : [];
       set_product_type($pid, $ptype, $attrs, product_variant_keep_rows());
+      // Attach per-variant (per-color/پس‌کد) images to their rows.
       if (!empty($_FILES['media_variant']) && function_exists('product_apply_variant_images')) {
         product_apply_variant_images($pid, $_FILES['media_variant']);
       }
@@ -293,7 +294,7 @@ include __DIR__ . '/inc/layout_head.php';
           </div>
           <div class="field">
             <label><?= $textbotlang['panel']['productPriceLabel'] ?></label>
-            <input type="number" name="price_product" class="input" placeholder="<?= htmlspecialchars($textbotlang['panel']['productZeroValue']) ?>" min="0">
+            <input type="text" name="price_product" class="input" data-money inputmode="numeric" placeholder="<?= htmlspecialchars($textbotlang['panel']['productZeroValue']) ?>">
           </div>
 
           <!-- VPN-only fields: hidden for physical/digital/etc. -->
@@ -407,7 +408,7 @@ include __DIR__ . '/inc/layout_head.php';
           </div>
           <div class="field">
             <label>قیمت (تومان)</label>
-            <input type="number" name="price_product" id="edit_price" class="input" min="0">
+            <input type="text" name="price_product" id="edit_price" class="input" data-money inputmode="numeric">
           </div>
 
           <!-- VPN-only fields: hidden for physical/digital/etc. -->
@@ -493,12 +494,33 @@ include __DIR__ . '/inc/layout_head.php';
   .rep-field .rep-actions { width: 38px; text-align: center; }
   .rep-field .rep-del { padding: 2px 10px; line-height: 1; font-size: 16px; }
   .rep-field .rep-add { margin-top: 8px; }
-  /* Per-variant image cell */
-  .rep-img-cell { width: 96px; }
-  .rep-img-pick { display: inline-flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer; }
-  .rep-img-thumb { width: 54px; height: 54px; object-fit: cover; border-radius: 8px; border: 1px solid var(--bd); display: block; }
-  .rep-img-empty { display: inline-flex; align-items: center; justify-content: center; width: 54px; height: 54px; border: 1px dashed var(--bd); border-radius: 8px; color: var(--mute); font-size: 10px; text-align: center; }
-  .rep-img-btn { font-size: 11px; color: var(--accent); font-weight: 700; }
+  /* Per-variant image cell (upload a separate photo for each variant). */
+  .rep-img-cell { text-align: center; min-width: 96px; }
+  .rep-img-pick {
+    display: inline-flex; flex-direction: column; align-items: center; gap: 4px;
+    cursor: pointer; padding: 4px; border: 1px dashed var(--bd, #cbd5e1);
+    border-radius: 8px; transition: border-color .15s, background .15s;
+  }
+  .rep-img-pick:hover { border-color: var(--accent, #3b82f6); background: var(--accent-s, rgba(59,130,246,.07)); }
+  .rep-img-thumb {
+    width: 54px; height: 54px; object-fit: cover; border-radius: 8px;
+    display: block; border: 1px solid var(--bd); background: var(--sf2, #f1f5f9);
+  }
+  .rep-img-empty {
+    width: 54px; height: 54px; display: inline-flex; align-items: center; justify-content: center;
+    font-size: 10px; color: var(--mute, #94a3b8); border-radius: 8px;
+    border: 1px dashed var(--bd); text-align: center; line-height: 1.2;
+  }
+  .rep-img-btn { font-size: 11px; color: var(--accent, #3b82f6); font-weight: 700; }
+
+  /* "این محصول پس‌کد دارد" badge shown when >1 variant. */
+  .rep-pscode-badge {
+    display: inline-block; margin-right: 8px; padding: 2px 10px;
+    font-size: 11px; font-weight: 600; border-radius: 999px;
+    color: #b45309; background: #fef3c7; border: 1px solid #fde68a;
+    vertical-align: middle;
+  }
+
   /* Main media uploader preview */
   #addMediaPicked { width: 100%; }
   .media-pick-head { color: #16a34a; font-weight: 700; font-size: .8rem; margin-top: 4px; }
@@ -516,6 +538,10 @@ include __DIR__ . '/inc/layout_head.php';
 <script>
   // Product types + their attribute field definitions (from product_types()).
   window.PRODUCT_TYPES = <?= json_encode(product_types(), JSON_UNESCAPED_UNICODE) ?>;
+  // Custom variant schemas (category-like variant templates). Each entry:
+  // { id, name, fields:[ {key,label,type,options?,allow_custom?}, ... ] }.
+  // The variants table builds its columns from the chosen schema's fields.
+  window.VARIANT_SCHEMAS = <?= json_encode(function_exists('variant_schemas_list') ? variant_schemas_list() : [], JSON_UNESCAPED_UNICODE) ?>;
   // Enabled (API-backed) shipping carriers the admin can attach to a product.
   window.SHIPPING_CARRIERS = <?= json_encode(function_exists('enabled_shipping_carriers') ? enabled_shipping_carriers() : [], JSON_UNESCAPED_UNICODE) ?>;
 </script>

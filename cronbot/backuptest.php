@@ -116,11 +116,11 @@ foreach ($sslStrategies as $sslFlag) {
 }
 
 if ($success) {
-    line('✅', 'بکاپ با موفقیت گرفته شد. مشکلی وجود ندارد.');
+    line('✅', 'بکاپ با mysqldump موفق بود. مشکلی وجود ندارد.');
     line('ℹ️', 'حالت اتصال موفق: ' . $usedFlag);
     line('📦', 'حجم فایل تستی: ' . number_format((float) @filesize($tmp)) . ' بایت (این فایل تستی پاک شد).');
 } else {
-    line('❌', 'بکاپ شکست خورد. کد خروج: ' . (int) $lastRv);
+    line('⚠️', 'mysqldump شکست خورد. کد خروج: ' . (int) $lastRv);
 
     $hint = '';
     if (stripos($lastErr, 'access denied') !== false) {
@@ -133,6 +133,12 @@ if ($success) {
         $hint = 'فضای دیسک سرور پر شده است. مقداری فضا آزاد کنید.';
     } elseif (stripos($lastErr, 'unknown option') !== false || stripos($lastErr, 'unknown variable') !== false) {
         $hint = 'نسخهٔ mysqldump این گزینه را پشتیبانی نمی‌کند (ربات خودش حالت‌های دیگر را امتحان کرد).';
+    } elseif ((int) $lastRv === 7 || $lastErr === '') {
+        // exit code 7 with no stderr = the classic MariaDB-client ↔ MySQL-8.4-server
+        // mismatch (or an 8.0-only collation mysqldump chokes on mid-stream).
+        $hint = 'به احتمال زیاد ناسازگاری نسخهٔ کلاینت و سرور است: کلاینت mysqldump از نوع MariaDB '
+            . 'و سرور شما MySQL 8 است. در این حالت mysqldump گاهی وسط کار با کد ۷ متوقف می‌شود و '
+            . 'فایل ناقص می‌سازد. ربات اکنون به‌طور خودکار از روش جایگزین PHP استفاده می‌کند (پایین را ببینید).';
     }
 
     if ($hint !== '') {
@@ -144,7 +150,23 @@ if ($success) {
         echo '<pre style="white-space:pre-wrap;background:#1b1f27;border:1px solid #2a2f3a;border-radius:8px;padding:12px;color:#ff9b9b">'
             . htmlspecialchars($shown, ENT_QUOTES, 'UTF-8') . '</pre>';
     } else {
-        line('🧾', 'mysqldump هیچ پیام خطایی چاپ نکرد؛ احتمالاً توسط سرور متوقف شده یا اجازهٔ نوشتن فایل را نداشته است.');
+        line('🧾', 'mysqldump هیچ پیام خطایی چاپ نکرد؛ کد خروج ۷ معمولاً یعنی نسخهٔ کلاینت با سرور سازگار نیست.');
+    }
+
+    // --- Try the PHP fallback right here so the admin sees it works. ---------
+    echo '<hr style="border-color:#2a2f3a;margin:16px 0">';
+    line('🧪', 'حالا روش جایگزین (دامپ با PHP) را امتحان می‌کنیم…');
+    if (function_exists('php_database_dump')) {
+        @unlink($tmp);
+        $phpErr = '';
+        if (php_database_dump($tmp, $phpErr)) {
+            line('✅', 'روش جایگزین PHP موفق بود! بکاپ شبانه از این به بعد به‌طور خودکار از همین روش استفاده می‌کند.');
+            line('📦', 'حجم فایل تستی (روش PHP): ' . number_format((float) @filesize($tmp)) . ' بایت (پاک شد).');
+        } else {
+            line('❌', 'روش جایگزین PHP هم شکست خورد: ' . $phpErr);
+        }
+    } else {
+        line('❌', 'تابع php_database_dump یافت نشد. function.php را به‌روزرسانی کنید.');
     }
 }
 

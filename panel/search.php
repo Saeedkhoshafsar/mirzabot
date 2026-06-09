@@ -18,8 +18,8 @@ $types    = function_exists('product_types') ? product_types() : [];
 $q        = trim((string) ($_GET['q'] ?? ''));
 $ptype    = (string) ($_GET['ptype'] ?? '');
 $ostatus  = (string) ($_GET['ostatus'] ?? '');
-$priceMin = ($_GET['price_min'] ?? '') !== '' ? (int) $_GET['price_min'] : null;
-$priceMax = ($_GET['price_max'] ?? '') !== '' ? (int) $_GET['price_max'] : null;
+$priceMin = ($_GET['price_min'] ?? '') !== '' ? money_int($_GET['price_min']) : null;
+$priceMax = ($_GET['price_max'] ?? '') !== '' ? money_int($_GET['price_max']) : null;
 $like     = '%' . $q . '%';
 
 $products = [];
@@ -130,11 +130,11 @@ include __DIR__ . '/inc/layout_head.php';
                 </div>
                 <div class="field" style="flex:1;min-width:120px">
                     <label>حداقل قیمت</label>
-                    <input type="number" name="price_min" class="input" value="<?= $priceMin !== null ? (int) $priceMin : '' ?>">
+                    <input type="text" name="price_min" class="input" data-money inputmode="numeric" value="<?= $priceMin !== null ? number_format((int) $priceMin) : '' ?>">
                 </div>
                 <div class="field" style="flex:1;min-width:120px">
                     <label>حداکثر قیمت</label>
-                    <input type="number" name="price_max" class="input" value="<?= $priceMax !== null ? (int) $priceMax : '' ?>">
+                    <input type="text" name="price_max" class="input" data-money inputmode="numeric" value="<?= $priceMax !== null ? number_format((int) $priceMax) : '' ?>">
                 </div>
             </div>
             <div style="margin-top:12px;display:flex;gap:8px">

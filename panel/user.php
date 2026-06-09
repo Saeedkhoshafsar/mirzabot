@@ -21,7 +21,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
     if ($action === 'add_balance') {
-        $amount = (int) ($_POST['amount'] ?? 0);
+        $amount = money_int($_POST['amount'] ?? 0);
         if ($amount >= 1000) {
             db_query($pdo, "UPDATE user SET Balance = Balance + ? WHERE id = ?", [$amount, $id]);
             flash('success', number_format($amount) . $textbotlang['panel']['userBalanceAddedSuffix']);
@@ -462,7 +462,7 @@ include __DIR__ . '/inc/layout_head.php';
                 <input type="hidden" name="action" value="add_balance">
                 <div class="field">
                     <label><?= $textbotlang['panel']['userDetailUser'] ?></label>
-                    <input type="number" name="amount" class="input" placeholder="<?= htmlspecialchars($textbotlang['panel']['userAmountPlaceholder']) ?>" min="1000" required>
+                    <input type="text" name="amount" class="input" data-money inputmode="numeric" placeholder="<?= htmlspecialchars($textbotlang['panel']['userAmountPlaceholder']) ?>" required>
                     <span class="field-hint"><?= $textbotlang['panel']['userDetailAmount'] ?> <strong><?= number_format($balance) ?> <?= $textbotlang['panel']['userDetailMethod'] ?></strong></span>
                 </div>
             </div>
