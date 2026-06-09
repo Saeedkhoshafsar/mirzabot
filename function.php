@@ -2065,6 +2065,184 @@ function set_product_type($product_id, $type, array $attributes = [])
     }
 }
 
+// ===========================================================================
+// Product categories (managed centrally, reused on the product form).
+// Backed by the existing `category` table: id + remark (the category name).
+// A product can belong to several categories; we store them as a comma-joined
+// string in product.category (backward-compatible with the old free-text field
+// and the existing search which does `category LIKE ?`).
+// ===========================================================================
+
+/** List all categories (name strings), sorted, de-duplicated. */
+function categories_list()
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return [];
+    }
+    try {
+        $rows = $pdo->query("SELECT id, remark FROM category ORDER BY remark ASC")->fetchAll(PDO::FETCH_ASSOC);
+        return $rows ?: [];
+    } catch (Exception $e) {
+        error_log("categories_list error: " . $e->getMessage());
+        return [];
+    }
+}
+
+/** Just the category names as a flat array. */
+function categories_names()
+{
+    $names = [];
+    foreach (categories_list() as $c) {
+        $n = trim((string) ($c['remark'] ?? ''));
+        if ($n !== '') {
+            $names[] = $n;
+        }
+    }
+    return $names;
+}
+
+/** Add a category by name (no duplicates, case-insensitive). Returns true on add. */
+function categories_add($name)
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return false;
+    }
+    $name = trim((string) $name);
+    if ($name === '' || mb_strlen($name) > 200) {
+        return false;
+    }
+    try {
+        // reject case-insensitive duplicate
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM category WHERE LOWER(remark) = LOWER(?)");
+        $stmt->execute([$name]);
+        if ((int) $stmt->fetchColumn() > 0) {
+            return false;
+        }
+        $stmt = $pdo->prepare("INSERT INTO category (remark) VALUES (?)");
+        return $stmt->execute([$name]);
+    } catch (Exception $e) {
+        error_log("categories_add error: " . $e->getMessage());
+        return false;
+    }
+}
+
+/** Rename a category by id; also updates references inside product.category CSV. */
+function categories_rename($id, $newName)
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return false;
+    }
+    $newName = trim((string) $newName);
+    if ($newName === '' || mb_strlen($newName) > 200) {
+        return false;
+    }
+    try {
+        $stmt = $pdo->prepare("SELECT remark FROM category WHERE id = ?");
+        $stmt->execute([(int) $id]);
+        $old = $stmt->fetchColumn();
+        if ($old === false) {
+            return false;
+        }
+        $stmt = $pdo->prepare("UPDATE category SET remark = ? WHERE id = ?");
+        $stmt->execute([$newName, (int) $id]);
+        // propagate rename into products that referenced the old name
+        product_category_replace_name((string) $old, $newName);
+        return true;
+    } catch (Exception $e) {
+        error_log("categories_rename error: " . $e->getMessage());
+        return false;
+    }
+}
+
+/** Delete a category by id; also strips it from product.category CSVs. */
+function categories_delete($id)
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return false;
+    }
+    try {
+        $stmt = $pdo->prepare("SELECT remark FROM category WHERE id = ?");
+        $stmt->execute([(int) $id]);
+        $name = $stmt->fetchColumn();
+        $stmt = $pdo->prepare("DELETE FROM category WHERE id = ?");
+        $stmt->execute([(int) $id]);
+        if ($name !== false) {
+            product_category_replace_name((string) $name, null); // remove from products
+        }
+        return true;
+    } catch (Exception $e) {
+        error_log("categories_delete error: " . $e->getMessage());
+        return false;
+    }
+}
+
+/** Parse a product.category CSV string into a clean array of names. */
+function product_category_parse($csv)
+{
+    $parts = preg_split('/\s*,\s*/', (string) $csv, -1, PREG_SPLIT_NO_EMPTY);
+    return array_values(array_unique(array_map('trim', $parts)));
+}
+
+/** Join an array of category names into the stored CSV form. */
+function product_category_join(array $names)
+{
+    $clean = [];
+    foreach ($names as $n) {
+        $n = trim((string) $n);
+        if ($n !== '' && !in_array($n, $clean, true)) {
+            $clean[] = $n;
+        }
+    }
+    return implode(', ', $clean);
+}
+
+/**
+ * Replace (or remove, when $new===null) a category name inside every product's
+ * category CSV. Keeps product assignments consistent after rename/delete.
+ */
+function product_category_replace_name($old, $new)
+{
+    global $pdo;
+    if (!isset($pdo)) {
+        return;
+    }
+    $old = trim((string) $old);
+    if ($old === '') {
+        return;
+    }
+    try {
+        $stmt = $pdo->prepare("SELECT id, category FROM product WHERE category LIKE ?");
+        $stmt->execute(['%' . $old . '%']);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $upd = $pdo->prepare("UPDATE product SET category = ? WHERE id = ?");
+        foreach ($rows as $r) {
+            $names = product_category_parse($r['category'] ?? '');
+            $changed = false;
+            $out = [];
+            foreach ($names as $n) {
+                if (strcasecmp($n, $old) === 0) {
+                    $changed = true;
+                    if ($new !== null && trim((string) $new) !== '') {
+                        $out[] = trim((string) $new);
+                    }
+                    // when $new is null -> drop it
+                } else {
+                    $out[] = $n;
+                }
+            }
+            if ($changed) {
+                $upd->execute([product_category_join($out), (int) $r['id']]);
+            }
+        }
+    } catch (Exception $e) {
+        error_log("product_category_replace_name error: " . $e->getMessage());
+    }
+}
+
 /**
  * List media rows for a product, ordered by sort then id.
  */

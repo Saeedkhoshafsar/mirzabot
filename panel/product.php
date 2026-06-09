@@ -17,11 +17,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add')
     exit;
   }
   $code = bin2hex(random_bytes(2));
+  // Categories: accept multi-select array (category[]) and store as CSV; fall back to legacy free-text.
+  $catCsv = '';
+  if (function_exists('product_category_join') && is_array($_POST['category'] ?? null)) {
+    $catCsv = product_category_join($_POST['category']);
+    // any brand-new typed category persists to the category table too
+    if (function_exists('categories_add')) {
+      foreach ($_POST['category'] as $cn) {
+        $cn = trim((string) $cn);
+        if ($cn !== '') {
+          categories_add($cn);
+        }
+      }
+    }
+  } else {
+    $catCsv = $_POST['cetegory_product'] ?? '';
+  }
   try {
     db_query(
       $pdo,
       "INSERT INTO product (name_product,code_product,price_product,Volume_constraint,Service_time,Location,agent,data_limit_reset,note,category,hide_panel,one_buy_status) VALUES (?,?,?,?,?,?,?,'no_reset',?,?,'{}','0')",
-      [$name, $code, (int) ($_POST['price_product'] ?? 0), (int) ($_POST['volume_product'] ?? 0), (int) ($_POST['time_product'] ?? 0), $_POST['namepanel'] ?? '', $_POST['agent_product'] ?? '', $_POST['note_product'] ?? '', $_POST['cetegory_product'] ?? '']
+      [$name, $code, (int) ($_POST['price_product'] ?? 0), (int) ($_POST['volume_product'] ?? 0), (int) ($_POST['time_product'] ?? 0), $_POST['namepanel'] ?? '', $_POST['agent_product'] ?? '', $_POST['note_product'] ?? '', $catCsv]
     );
     // Generic product type + attributes (defaults to 'vpn' if unset).
     $newId = (int) $pdo->lastInsertId();
@@ -60,11 +76,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'edit'
   $pid = (int) ($_POST['edit_id'] ?? 0);
   $name = trim($_POST['name_product'] ?? '');
   if ($pid && $name !== '') {
+    // Categories: accept multi-select array (category[]); fall back to legacy free-text.
+    $catCsv = '';
+    if (function_exists('product_category_join') && is_array($_POST['category'] ?? null)) {
+      $catCsv = product_category_join($_POST['category']);
+      if (function_exists('categories_add')) {
+        foreach ($_POST['category'] as $cn) {
+          $cn = trim((string) $cn);
+          if ($cn !== '') {
+            categories_add($cn);
+          }
+        }
+      }
+    } else {
+      $catCsv = $_POST['cetegory_product'] ?? '';
+    }
     try {
       db_query(
         $pdo,
         "UPDATE product SET name_product=?,price_product=?,Volume_constraint=?,Service_time=?,Location=?,agent=?,note=?,category=? WHERE id=?",
-        [$name, (int) ($_POST['price_product'] ?? 0), (int) ($_POST['volume_product'] ?? 0), (int) ($_POST['time_product'] ?? 0), $_POST['namepanel'] ?? '', $_POST['agent_product'] ?? '', $_POST['note_product'] ?? '', $_POST['cetegory_product'] ?? '', $pid]
+        [$name, (int) ($_POST['price_product'] ?? 0), (int) ($_POST['volume_product'] ?? 0), (int) ($_POST['time_product'] ?? 0), $_POST['namepanel'] ?? '', $_POST['agent_product'] ?? '', $_POST['note_product'] ?? '', $catCsv, $pid]
       );
       // Generic product type + attributes
       $ptype = $_POST['product_type'] ?? 'vpn';
@@ -92,6 +123,7 @@ try {
   $panels = db_fetchAll($pdo, "SELECT * FROM marzban_panel");
 } catch (Exception $e) {
 }
+$allCats = function_exists('categories_names') ? categories_names() : [];
 $products = db_fetchAll($pdo, "SELECT * FROM product ORDER BY id");
 
 $pageTitle = $textbotlang['panel']['productsTitle'];
@@ -155,9 +187,12 @@ include __DIR__ . '/inc/layout_head.php';
               <td class="cn"><?= htmlspecialchars($p['Volume_constraint'] ?? '—') ?> <span class="cf">GB</span></td>
               <td class="cn"><?= htmlspecialchars($p['Service_time'] ?? '—') ?> <span class="cf"><?= $textbotlang['panel']['productDurationUnit'] ?></span></td>
               <td class="cf"><?= htmlspecialchars(trunc($p['Location'] ?? '—', 16)) ?></td>
-              <td><?php if (!empty($p['category'])): ?><span
-                    class="tag tag-info"><?= htmlspecialchars($p['category']) ?></span><?php else: ?><span
-                    class="cf">—</span><?php endif; ?></td>
+              <td><?php
+              $pcats = function_exists('product_category_parse') ? product_category_parse($p['category'] ?? '') : (empty($p['category']) ? [] : [$p['category']]);
+              if (!empty($pcats)):
+                foreach ($pcats as $pc): ?><span class="tag tag-info"
+                    style="margin:1px 2px;display:inline-block"><?= htmlspecialchars($pc) ?></span><?php endforeach;
+              else: ?><span class="cf">—</span><?php endif; ?></td>
               <td class="cm" style="font-size:.72rem"><?= htmlspecialchars($p['code_product'] ?? '') ?></td>
               <td>
                 <div style="display:flex;gap:5px">
@@ -249,8 +284,25 @@ include __DIR__ . '/inc/layout_head.php';
           </div>
 
           <div class="field">
-            <label><?= $textbotlang['panel']['productCategoryLabel'] ?></label>
-            <input type="text" name="cetegory_product" data-example="category" class="input" placeholder="<?= htmlspecialchars($textbotlang['panel']['productTypeExample']) ?>">
+            <label><?= $textbotlang['panel']['productCategoryLabel'] ?>
+              <a href="categories.php" style="font-size:12px;font-weight:normal;margin-right:6px;color:#3b82f6;">مدیریت دسته‌بندی‌ها</a>
+            </label>
+            <div class="cat-picker" id="add_cat_picker">
+              <?php if (empty($allCats)): ?>
+                <div class="cat-empty" style="color:#888;font-size:13px;">هنوز دسته‌بندی ندارید. از طریق
+                  «مدیریت دسته‌بندی‌ها» یا کادر زیر اضافه کنید.</div>
+              <?php else: ?>
+                <?php foreach ($allCats as $cn): ?>
+                  <label class="cat-chip"><input type="checkbox" name="category[]"
+                      value="<?= htmlspecialchars($cn) ?>"> <span><?= htmlspecialchars($cn) ?></span></label>
+                <?php endforeach; ?>
+              <?php endif; ?>
+            </div>
+            <div class="cat-add-row" style="display:flex;gap:6px;margin-top:8px;">
+              <input type="text" id="add_cat_new" class="input" placeholder="افزودن دسته‌بندی جدید…"
+                style="flex:1;">
+              <button type="button" class="btn btn-sm" onclick="addNewCategoryChip('add')">افزودن</button>
+            </div>
           </div>
           <div class="field">
             <label><?= $textbotlang['panel']['productTypeLabel'] ?></label>
@@ -345,9 +397,25 @@ include __DIR__ . '/inc/layout_head.php';
             </select>
           </div>
 
-          <div class="field">
-            <label>دسته‌بندی</label>
-            <input type="text" name="cetegory_product" id="edit_cat" data-example="category" class="input">
+          <div class="field full">
+            <label>دسته‌بندی
+              <a href="categories.php" style="font-size:12px;font-weight:normal;margin-right:6px;color:#3b82f6;">مدیریت دسته‌بندی‌ها</a>
+            </label>
+            <div class="cat-picker" id="edit_cat_picker">
+              <?php if (empty($allCats)): ?>
+                <div class="cat-empty" style="color:#888;font-size:13px;">هنوز دسته‌بندی ندارید.</div>
+              <?php else: ?>
+                <?php foreach ($allCats as $cn): ?>
+                  <label class="cat-chip"><input type="checkbox" name="category[]"
+                      value="<?= htmlspecialchars($cn) ?>"> <span><?= htmlspecialchars($cn) ?></span></label>
+                <?php endforeach; ?>
+              <?php endif; ?>
+            </div>
+            <div class="cat-add-row" style="display:flex;gap:6px;margin-top:8px;">
+              <input type="text" id="edit_cat_new" class="input" placeholder="افزودن دسته‌بندی جدید…"
+                style="flex:1;">
+              <button type="button" class="btn btn-sm" onclick="addNewCategoryChip('edit')">افزودن</button>
+            </div>
           </div>
           <div class="field">
             <label>نوع کاربر</label>
@@ -390,6 +458,11 @@ include __DIR__ . '/inc/layout_head.php';
   .rep-field .rep-actions { width: 38px; text-align: center; }
   .rep-field .rep-del { padding: 2px 10px; line-height: 1; font-size: 16px; }
   .rep-field .rep-add { margin-top: 8px; }
+  .cat-picker { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px; border: 1px solid var(--bd); border-radius: 10px; min-height: 42px; align-content: flex-start; }
+  .cat-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border: 1px solid var(--bd); border-radius: 999px; cursor: pointer; font-size: 13px; user-select: none; transition: background .15s, border-color .15s; }
+  .cat-chip:hover { border-color: #3b82f6; }
+  .cat-chip input { margin: 0; cursor: pointer; }
+  .cat-chip:has(input:checked) { background: rgba(59,130,246,.12); border-color: #3b82f6; }
 </style>
 <script>
   // Product types + their attribute field definitions (from product_types()).

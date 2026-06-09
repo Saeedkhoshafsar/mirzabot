@@ -202,13 +202,85 @@ window.renderAttrFields = function (which, values) {
     });
 };
 
+// --- Category multi-select helpers (Point 4) ---
+
+// Parse a stored CSV ("a, b, c") into a clean array of names.
+function parseCategoryCsv(csv) {
+    return String(csv || '')
+        .split(',')
+        .map(function (s) { return s.trim(); })
+        .filter(function (s) { return s.length > 0; });
+}
+
+// Tick the checkboxes in the given form's picker that match the stored CSV.
+// Any stored category that has no checkbox yet (legacy free-text) gets one added.
+window.preselectCategories = function (which, csv) {
+    var picker = document.getElementById(which + '_cat_picker');
+    if (!picker) return;
+    var wanted = parseCategoryCsv(csv);
+    // uncheck everything first
+    picker.querySelectorAll('input[type=checkbox]').forEach(function (cb) { cb.checked = false; });
+    wanted.forEach(function (name) {
+        var existing = null;
+        picker.querySelectorAll('input[type=checkbox]').forEach(function (cb) {
+            if (cb.value.toLowerCase() === name.toLowerCase()) existing = cb;
+        });
+        if (existing) {
+            existing.checked = true;
+        } else {
+            appendCategoryChip(picker, name, true); // legacy/unknown category -> add as checked chip
+        }
+    });
+};
+
+// Build a new checked chip inside a picker.
+function appendCategoryChip(picker, name, checked) {
+    var empty = picker.querySelector('.cat-empty');
+    if (empty) empty.remove();
+    var label = document.createElement('label');
+    label.className = 'cat-chip';
+    var cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.name = 'category[]';
+    cb.value = name;
+    cb.checked = !!checked;
+    var span = document.createElement('span');
+    span.textContent = name;
+    label.appendChild(cb);
+    label.appendChild(document.createTextNode(' '));
+    label.appendChild(span);
+    picker.appendChild(label);
+    return cb;
+}
+
+// "Add new category" button handler for add/edit forms.
+window.addNewCategoryChip = function (which) {
+    var inp = document.getElementById(which + '_cat_new');
+    var picker = document.getElementById(which + '_cat_picker');
+    if (!inp || !picker) return;
+    var name = (inp.value || '').trim();
+    if (!name) return;
+    // if it already exists, just check it
+    var found = null;
+    picker.querySelectorAll('input[type=checkbox]').forEach(function (cb) {
+        if (cb.value.toLowerCase() === name.toLowerCase()) found = cb;
+    });
+    if (found) {
+        found.checked = true;
+    } else {
+        appendCategoryChip(picker, name, true);
+    }
+    inp.value = '';
+    inp.focus();
+};
+
 window.openEditModal = function (p) {
     document.getElementById('edit_id').value = p.id || '';
     document.getElementById('edit_name').value = p.name_product || '';
     document.getElementById('edit_price').value = p.price_product || '';
     document.getElementById('edit_volume').value = p.Volume_constraint || '';
     document.getElementById('edit_time').value = p.Service_time || '';
-    document.getElementById('edit_cat').value = p.category || '';
+    preselectCategories('edit', p.category || '');
     document.getElementById('edit_agent').value = p.agent || '';
     document.getElementById('edit_note').value = p.note || '';
 
