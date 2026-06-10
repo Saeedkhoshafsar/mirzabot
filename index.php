@@ -684,22 +684,70 @@ if ($text == "/start" || $datain == "start" || $text == "start") {
     $envv  = getenv('PANEL_MODE');
     $smode = select("setting", "store_mode", null, null, "FETCH_COLUMN");
     if (is_array($smode)) { $smode = $smode[0] ?? null; }
-    $kbfd  = function_exists('keyboard_is_factory_default')
-        ? (keyboard_is_factory_default($setting['keyboardmain'] ?? '') ? 'yes' : 'NO (custom layout)') : 'n/a';
+    $isFactory = function_exists('keyboard_is_factory_default')
+        && keyboard_is_factory_default($setting['keyboardmain'] ?? '');
+    $kbfd = function_exists('keyboard_is_factory_default')
+        ? ($isFactory ? 'yes' : 'NO (custom layout)') : 'n/a';
+    if (!function_exists('flow_is_active') && is_file(__DIR__ . '/flow.php')) {
+        require_once __DIR__ . '/flow.php';
+    }
+    $flowAct = function_exists('flow_is_active') ? flow_is_active() : false;
+    $flowDis = function_exists('flow_disabled_menu_keys') ? flow_disabled_menu_keys() : [];
     $diag = "🔍 Panel mode diagnostics\n"
         . "──────────────────\n"
         . "ENV PANEL_MODE: " . ($envv === false ? "❌ NOT SET (compose/Coolify did not deliver it!)" : "✅ " . $envv) . "\n"
         . "panel_mode(): " . (function_exists('panel_mode') ? panel_mode() : 'n/a') . "\n"
         . "setting.store_mode: " . var_export($smode, true) . "\n"
         . "keyboardmain factory-default: " . $kbfd . "\n"
+        . "visual flow active: " . ($flowAct ? 'yes' : 'no') . "\n"
+        . "flow-disabled menu keys: " . (empty($flowDis) ? '(none)' : implode(', ', $flowDis)) . "\n"
         . "version file: " . trim((string) @file_get_contents(__DIR__ . '/version')) . "\n"
         . "──────────────────\n"
         . (($envv === false)
             ? "⚠️ ENV نرسیده: یعنی کانتینر با کد/کانفیگ قدیمی بالا آمده. چک‌لیست:\n1) فایل compose در Coolify باید PANEL_MODE را در environment داشته باشد\n2) اگر از ایمیج GHCR استفاده می‌کنید، باید ایمیج جدید pull شود (نه کش قدیمی)\n3) بعد از تغییر ENV حتماً Redeploy (نه فقط Restart)"
             : ((function_exists('panel_mode') && panel_mode() !== 'vpn')
-                ? "✅ حالت فروشگاه فعال است. اگر دکمه‌ها قدیمی‌اند، keyboardmain سفارشی شده (بالا را ببینید) — از پنل وب آن را ریست کنید."
+                ? ($isFactory
+                    ? "✅ همه‌چیز سالم است. /start بزنید تا منوی فروشگاه را ببینید."
+                    : "⚠️ منوی اصلی سفارشی شده و ربات طبق قانون «به چیدمان ادمین دست نزن» آن را خودکار عوض نمی‌کند.\nبا دکمهٔ زیر همین حالا به چیدمان فروشگاه بازنشانی کنید (چیدمان فعلی به فلو/تنظیمات دیگر آسیبی نمی‌زند).")
                 : "⚠️ ENV ست شده ولی مقدار نامعتبر است."));
-    sendmessage($from_id, $diag, null, 'HTML');
+    $diagKb = null;
+    if ($envv !== false && function_exists('panel_mode') && panel_mode() !== 'vpn' && !$isFactory) {
+        $diagKb = json_encode(['inline_keyboard' => [[
+            ['text' => '🛠 بازنشانی منو به چیدمان فروشگاه', 'callback_data' => 'modefixkb'],
+        ]]], JSON_UNESCAPED_UNICODE);
+    }
+    sendmessage($from_id, $diag, $diagKb, 'HTML');
+    return;
+} elseif (($text === '/fixmenu' || $datain === 'modefixkb') && in_array($from_id, $admin_ids)) {
+    // Admin-only one-tap repair: reset the stored main keyboard to the factory
+    // layout of the ACTIVE panel mode. This is the explicit consent the
+    // "never overwrite a custom layout" rule waits for — the admin asked.
+    if (function_exists('panel_mode') && panel_mode() !== 'vpn' && function_exists('default_main_keyboard_json')) {
+        $newkb = default_main_keyboard_json(panel_mode());
+        update("setting", "keyboardmain", $newkb, null, null);
+        $setting['keyboardmain'] = $newkb;
+        // Build the RESOLVED reply keyboard (template keys -> Persian labels via
+        // the same $replacements map keyboard.php uses) so the admin sees the
+        // new store menu instantly without having to /start.
+        $rows = json_decode($newkb, true)['keyboard'] ?? [];
+        if (function_exists('strip_vpn_only_buttons') && !empty($rows)) {
+            $rows = strip_vpn_only_buttons($rows);
+        }
+        $resolvedJson = strtr(
+            json_encode(['keyboard' => $rows, 'resize_keyboard' => true], JSON_UNESCAPED_UNICODE),
+            isset($replacements) && is_array($replacements) ? $replacements : []
+        );
+        sendmessage(
+            $from_id,
+            "✅ منوی اصلی به چیدمان فروشگاه (حالت «" . panel_mode() . "») بازنشانی شد.\n"
+            . "دکمه‌های جدید: 🛍 خرید، 📦 سفارش‌ها، 👛 کیف پول، و …\n"
+            . "اگر در ویرایشگر فلو دکمهٔ «خرید» را خاموش کرده باشید، از panel/flow.php دوباره روشنش کنید.",
+            $resolvedJson,
+            'HTML'
+        );
+    } else {
+        sendmessage($from_id, "حالت فعال vpn است؛ بازنشانی فروشگاهی لازم نیست. (PANEL_MODE را چک کنید: /mode)", null, 'HTML');
+    }
     return;
 } elseif ($datain === 'shoporders' || $text === '/myorders') {
     // Customer's own shop orders + tracking codes — isolated from the VPN flow.
