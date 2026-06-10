@@ -688,12 +688,17 @@ if ($text == "/start" || $datain == "start" || $text == "start") {
 } elseif (
     $datain === 'shoplist' || $text === '/shop' || $datain === 'shopcart' || $text === '/cart'
     || preg_match('/^shop(view|buy|coupon|gallery)_\d+$/', $datain)
+    || preg_match('/^shopnewest_\d+$/', $datain)
+    || preg_match('/^shopcatv_[0-9a-f]{8}_\d+$/', $datain)
+    || in_array($datain, ['shopmenu', 'shopbuymenu', 'shopcats', 'shopprofile', 'shopsetphone', 'shopaddaddress'], true)
     || preg_match('/^cart(add|inc|dec|del)_/', $datain)
     || in_array($datain, ['cartclear', 'cartcoupon', 'cartcheckout', 'cartnoop'], true)
 ) {
     // Generic (non-VPN) shop purchase path + multi-item cart — fully isolated
     // from the VPN flow (only fires on shop*/cart* patterns).
-    $shopData = ($text === '/shop') ? 'shoplist' : (($text === '/cart') ? 'shopcart' : $datain);
+    // /shop now opens the store MAIN MENU (پروفایل/خرید/سبد/پشتیبان);
+    // the flat product list is still reachable via «همهٔ محصولات».
+    $shopData = ($text === '/shop') ? 'shopmenu' : (($text === '/cart') ? 'shopcart' : $datain);
     shop_handle_callback($shopData, $from_id, $user);
     return;
 } elseif (

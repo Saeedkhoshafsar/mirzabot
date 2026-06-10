@@ -4265,6 +4265,289 @@ function shop_render_list($from_id)
     sendmessage($from_id, "🛍 <b>" . store_term('store', 'فروشگاه') . "</b>\nیک محصول را انتخاب کنید:", json_encode($kb), 'html');
 }
 
+// ===========================================================================
+// Store main menu + browse flows (استپ ۱۵ — نقشهٔ راه فروشگاه):
+//   پروفایل / خرید / سبد خرید / پشتیبان  →  خرید: دسته‌بندی، جستجوی پیشرفته،
+//   جدیدترین محصولات (صفحه‌بندی ۵تایی با دکمهٔ «بعدی»).
+// ===========================================================================
+
+/**
+ * Whether the customer's shop profile is complete enough to checkout.
+ * Minimal definition: a verified phone number stored on the user row.
+ * (Physical products additionally collect a postal address in their own flow.)
+ */
+function shop_profile_complete($user)
+{
+    $num = (string) ($user['number'] ?? 'none');
+    return $num !== '' && $num !== 'none' && $num !== '0';
+}
+
+/**
+ * Send the store's main menu: پروفایل / خرید / سبد خرید / پشتیبان.
+ */
+function shop_render_main_menu($from_id)
+{
+    $cartN = shop_cart_count($from_id);
+    $cartLabel = $cartN > 0 ? "🛒 سبد خرید ({$cartN})" : "🛒 سبد خرید";
+    $kb = ['inline_keyboard' => [
+        [['text' => "🛍 خرید", 'callback_data' => 'shopbuymenu'], ['text' => "👤 پروفایل", 'callback_data' => 'shopprofile']],
+        [[ 'text' => $cartLabel, 'callback_data' => 'shopcart'], ['text' => "🎧 پشتیبان", 'callback_data' => 'supportbtns']],
+        [['text' => "📦 سفارش‌های من", 'callback_data' => 'shoporders']],
+        [['text' => "🔙 بازگشت", 'callback_data' => 'backuser']],
+    ]];
+    sendmessage(
+        $from_id,
+        "🛍 <b>" . store_term('store', 'فروشگاه') . "</b>\nیکی از بخش‌های زیر را انتخاب کنید:",
+        json_encode($kb),
+        'html'
+    );
+}
+
+/**
+ * Send the «خرید» submenu: دسته‌بندی / جستجوی پیشرفته / جدیدترین محصولات.
+ */
+function shop_render_buy_menu($from_id)
+{
+    $kb = ['inline_keyboard' => [
+        [['text' => "🆕 جدیدترین محصولات", 'callback_data' => 'shopnewest_0']],
+        [['text' => "🗂 دسته‌بندی", 'callback_data' => 'shopcats'], ['text' => "🔍 جستجوی پیشرفته", 'callback_data' => 'shopsearch']],
+        [['text' => "🛍 همهٔ محصولات", 'callback_data' => 'shoplist']],
+        [['text' => "🔙 بازگشت", 'callback_data' => 'shopmenu']],
+    ]];
+    sendmessage($from_id, "🛍 <b>خرید</b>\nچطور می‌خواهید محصول را پیدا کنید؟", json_encode($kb), 'html');
+}
+
+/**
+ * Newest IN-STOCK shop products, newest first, paged.
+ * Returns ['items'=>rows,'has_more'=>bool] for the requested page.
+ */
+function shop_newest_products($page = 0, $per = 5, $bot_id = null)
+{
+    $page = max(0, (int) $page);
+    $per  = max(1, (int) $per);
+    $all  = shop_product_list($bot_id, 500);
+    // Only currently-available products are listed (آنهایی که موجودند).
+    $avail = [];
+    foreach ($all as $p) {
+        if (shop_product_available($p)) {
+            $avail[] = $p;
+        }
+    }
+    $slice = array_slice($avail, $page * $per, $per);
+    return [
+        'items'    => $slice,
+        'has_more' => count($avail) > ($page + 1) * $per,
+        'total'    => count($avail),
+    ];
+}
+
+/**
+ * Render the «جدیدترین محصولات» page: 5 products per page + «بعدی» (and
+ * «قبلی» when applicable) sliding buttons.
+ */
+function shop_render_newest($from_id, $page = 0)
+{
+    $cur  = store_currency();
+    $page = max(0, (int) $page);
+    $data = shop_newest_products($page, 5);
+    if (empty($data['items'])) {
+        if ($page > 0) { // walked past the end — show the first page instead
+            shop_render_newest($from_id, 0);
+            return;
+        }
+        sendmessage($from_id, "در حال حاضر محصول موجودی برای فروش نیست.", json_encode(['inline_keyboard' => [
+            [['text' => "🔙 بازگشت", 'callback_data' => 'shopbuymenu']],
+        ]]), 'html');
+        return;
+    }
+    $kb = ['inline_keyboard' => []];
+    foreach ($data['items'] as $p) {
+        $price = (int) preg_replace('/[^\d]/', '', (string) ($p['price_product'] ?? '0'));
+        $kb['inline_keyboard'][] = [[
+            'text' => $p['name_product'] . ' — ' . number_format($price) . ' ' . $cur,
+            'callback_data' => 'shopview_' . (int) $p['id'],
+        ]];
+    }
+    $nav = [];
+    if ($page > 0) {
+        $nav[] = ['text' => "➡️ قبلی", 'callback_data' => 'shopnewest_' . ($page - 1)];
+    }
+    if ($data['has_more']) {
+        $nav[] = ['text' => "بعدی ⬅️", 'callback_data' => 'shopnewest_' . ($page + 1)];
+    }
+    if (!empty($nav)) {
+        $kb['inline_keyboard'][] = $nav;
+    }
+    $kb['inline_keyboard'][] = [['text' => "🔙 بازگشت", 'callback_data' => 'shopbuymenu']];
+    $totalPages = (int) ceil($data['total'] / 5);
+    sendmessage(
+        $from_id,
+        "🆕 <b>جدیدترین محصولات</b> (موجود)\nصفحهٔ " . ($page + 1) . " از " . max(1, $totalPages) . ":",
+        json_encode($kb),
+        'html'
+    );
+}
+
+/**
+ * Distinct category names actually used by shop products (parsed from the
+ * CSV column), each with a stable 8-char hash usable inside callback_data
+ * (Persian names are too long/unsafe for Telegram's 64-byte limit).
+ * Returns [ ['name'=>..., 'hash'=>..., 'count'=>n], ... ] sorted by name.
+ */
+function shop_categories_with_counts($bot_id = null)
+{
+    $all = shop_product_list($bot_id, 500);
+    $map = [];
+    foreach ($all as $p) {
+        foreach (product_category_parse($p['category'] ?? '') as $name) {
+            if (!isset($map[$name])) {
+                $map[$name] = 0;
+            }
+            $map[$name]++;
+        }
+    }
+    ksort($map, SORT_NATURAL);
+    $out = [];
+    foreach ($map as $name => $count) {
+        $out[] = ['name' => $name, 'hash' => substr(md5($name), 0, 8), 'count' => $count];
+    }
+    return $out;
+}
+
+/** Resolve a category hash (from callback_data) back to its name, or null. */
+function shop_category_by_hash($hash, $bot_id = null)
+{
+    foreach (shop_categories_with_counts($bot_id) as $c) {
+        if ($c['hash'] === (string) $hash) {
+            return $c['name'];
+        }
+    }
+    return null;
+}
+
+/**
+ * Render the category list as inline buttons (shopcatv_{hash}_0).
+ */
+function shop_render_categories($from_id)
+{
+    $cats = shop_categories_with_counts();
+    if (empty($cats)) {
+        sendmessage($from_id, "هنوز دسته‌بندی‌ای ثبت نشده است.", json_encode(['inline_keyboard' => [
+            [['text' => "🛍 همهٔ محصولات", 'callback_data' => 'shoplist']],
+            [['text' => "🔙 بازگشت", 'callback_data' => 'shopbuymenu']],
+        ]]), 'html');
+        return;
+    }
+    $kb = ['inline_keyboard' => []];
+    foreach ($cats as $c) {
+        $kb['inline_keyboard'][] = [[
+            'text' => "🗂 " . $c['name'] . " (" . $c['count'] . ")",
+            'callback_data' => 'shopcatv_' . $c['hash'] . '_0',
+        ]];
+    }
+    $kb['inline_keyboard'][] = [['text' => "🔙 بازگشت", 'callback_data' => 'shopbuymenu']];
+    sendmessage($from_id, "🗂 <b>دسته‌بندی محصولات</b>\nیک دسته را انتخاب کنید:", json_encode($kb), 'html');
+}
+
+/**
+ * Render one category's products, 5 per page with بعدی/قبلی navigation.
+ */
+function shop_render_category($from_id, $hash, $page = 0)
+{
+    $name = shop_category_by_hash($hash);
+    if ($name === null) {
+        shop_render_categories($from_id);
+        return;
+    }
+    $cur  = store_currency();
+    $page = max(0, (int) $page);
+    $all  = shop_product_list(null, 500);
+    $rows = [];
+    foreach ($all as $p) {
+        if (in_array($name, product_category_parse($p['category'] ?? ''), true)) {
+            $rows[] = $p;
+        }
+    }
+    $slice = array_slice($rows, $page * 5, 5);
+    if (empty($slice)) {
+        if ($page > 0) {
+            shop_render_category($from_id, $hash, 0);
+            return;
+        }
+        sendmessage($from_id, "محصولی در این دسته نیست.", json_encode(['inline_keyboard' => [
+            [['text' => "🔙 بازگشت", 'callback_data' => 'shopcats']],
+        ]]), 'html');
+        return;
+    }
+    $kb = ['inline_keyboard' => []];
+    foreach ($slice as $p) {
+        $price = (int) preg_replace('/[^\d]/', '', (string) ($p['price_product'] ?? '0'));
+        $label = $p['name_product'] . ' — ' . number_format($price) . ' ' . $cur;
+        if (!shop_product_available($p)) {
+            $label = '⛔️ ' . $label;
+        }
+        $kb['inline_keyboard'][] = [['text' => $label, 'callback_data' => 'shopview_' . (int) $p['id']]];
+    }
+    $nav = [];
+    if ($page > 0) {
+        $nav[] = ['text' => "➡️ قبلی", 'callback_data' => 'shopcatv_' . $hash . '_' . ($page - 1)];
+    }
+    if (count($rows) > ($page + 1) * 5) {
+        $nav[] = ['text' => "بعدی ⬅️", 'callback_data' => 'shopcatv_' . $hash . '_' . ($page + 1)];
+    }
+    if (!empty($nav)) {
+        $kb['inline_keyboard'][] = $nav;
+    }
+    $kb['inline_keyboard'][] = [['text' => "🔙 بازگشت", 'callback_data' => 'shopcats']];
+    $totalPages = (int) ceil(count($rows) / 5);
+    sendmessage(
+        $from_id,
+        "🗂 <b>" . htmlspecialchars($name) . "</b>\nصفحهٔ " . ($page + 1) . " از " . max(1, $totalPages) . ":",
+        json_encode($kb),
+        'html'
+    );
+}
+
+/**
+ * Render the customer profile: name, phone, default postal address, plus
+ * actions to set/update the phone (Telegram contact button) and address.
+ */
+function shop_render_profile($from_id, $user)
+{
+    $name  = (string) ($user['namecustom'] ?? 'none');
+    $name  = ($name !== '' && $name !== 'none') ? $name : '—';
+    $phone = (string) ($user['number'] ?? 'none');
+    $phoneShown = shop_profile_complete($user) ? $phone : '❌ ثبت نشده';
+    $addr  = function_exists('address_default') ? address_default($from_id) : null;
+    $addrShown = $addr
+        ? (function_exists('address_format') ? address_format($addr) : '✅ ثبت شده')
+        : '❌ ثبت نشده';
+
+    $complete = shop_profile_complete($user);
+    $lines = [];
+    $lines[] = "👤 <b>پروفایل شما</b>";
+    $lines[] = "";
+    $lines[] = "🏷 نام: " . htmlspecialchars($name);
+    $lines[] = "📱 شماره تماس: " . htmlspecialchars($phoneShown);
+    $lines[] = "🏠 آدرس پیش‌فرض:\n" . $addrShown;
+    $lines[] = "";
+    $lines[] = $complete
+        ? "✅ پروفایل شما برای خرید کامل است."
+        : "⚠️ برای ثبت نهایی خرید، ابتدا شماره تماس خود را ثبت کنید.";
+
+    $kb = ['inline_keyboard' => []];
+    $kb['inline_keyboard'][] = [[
+        'text' => $complete ? "📱 تغییر شماره تماس" : "📱 ثبت شماره تماس",
+        'callback_data' => 'shopsetphone',
+    ]];
+    $kb['inline_keyboard'][] = [[
+        'text' => $addr ? "🏠 تغییر آدرس" : "🏠 افزودن آدرس",
+        'callback_data' => 'shopaddaddress',
+    ]];
+    $kb['inline_keyboard'][] = [['text' => "🔙 بازگشت", 'callback_data' => 'shopmenu']];
+    sendmessage($from_id, implode("\n", $lines), json_encode($kb), 'html');
+}
+
 /**
  * Search shop products (non-VPN) by name / note / category / SKU (attributes).
  * Returns matching product rows scoped to the current bot.
@@ -4435,13 +4718,13 @@ function shop_product_view_data($product)
     // sends the whole gallery — each photo captioned with its own variant.
     if (function_exists('product_variant_images') && count(product_variant_images($product, 1)) > 0) {
         $kb['inline_keyboard'][] = [[
-            'text' => "🖼 نمایش همهٔ پس‌کدها",
+            'text' => "🖼 مشاهدهٔ همهٔ تصاویر و تنوع‌های این محصول",
             'callback_data' => "shopgallery_" . (int) $product['id'],
         ]];
     }
     $kb['inline_keyboard'][] = [
         ['text' => "🛒 سبد خرید", 'callback_data' => "shopcart"],
-        ['text' => "🔙 بازگشت", 'callback_data' => "backuser"],
+        ['text' => "🔙 بازگشت", 'callback_data' => "shopmenu"],
     ];
 
     return [
@@ -5078,6 +5361,17 @@ function shop_checkout_cart($from_id, $user)
         return true;
     }
 
+    // Profile gate: finalising the cart requires a completed profile (phone
+    // number on record). Browsing/adding to cart is open to everyone; this is
+    // the moment the profile becomes mandatory.
+    if (!shop_profile_complete($user)) {
+        sendmessage($from_id, "⚠️ برای ثبت نهایی سفارش ابتدا باید پروفایل خود را تکمیل کنید (ثبت شماره تماس).\nسبد خرید شما محفوظ می‌ماند.", json_encode(['inline_keyboard' => [
+            [['text' => "👤 تکمیل پروفایل", 'callback_data' => "shopprofile"]],
+            [['text' => "🛒 بازگشت به سبد", 'callback_data' => "shopcart"]],
+        ]]), 'html');
+        return true;
+    }
+
     // Availability re-check for every line before charging anything.
     foreach ($data['lines'] as $l) {
         if (!shop_product_available($l['product'])) {
@@ -5199,6 +5493,55 @@ function shop_checkout_cart($from_id, $user)
  */
 function shop_handle_callback($datain, $from_id, $user)
 {
+    // Store main menu (پروفایل / خرید / سبد خرید / پشتیبان).
+    if ($datain === 'shopmenu') {
+        shop_render_main_menu($from_id);
+        return true;
+    }
+    // «خرید» submenu: دسته‌بندی / جستجوی پیشرفته / جدیدترین محصولات.
+    if ($datain === 'shopbuymenu') {
+        shop_render_buy_menu($from_id);
+        return true;
+    }
+    // Newest in-stock products, paged 5-by-5 with «بعدی».
+    if (preg_match('/^shopnewest_(\d+)$/', $datain, $m)) {
+        shop_render_newest($from_id, (int) $m[1]);
+        return true;
+    }
+    // Category list + a category's products (paged).
+    if ($datain === 'shopcats') {
+        shop_render_categories($from_id);
+        return true;
+    }
+    if (preg_match('/^shopcatv_([0-9a-f]{8})_(\d+)$/', $datain, $m)) {
+        shop_render_category($from_id, $m[1], (int) $m[2]);
+        return true;
+    }
+    // Customer profile view + actions.
+    if ($datain === 'shopprofile') {
+        shop_render_profile($from_id, $user);
+        return true;
+    }
+    if ($datain === 'shopsetphone') {
+        // Reuse the existing verified-contact flow (get_number step): the user
+        // must share their OWN Telegram contact, which index.php validates.
+        step('get_number', $from_id);
+        sendmessage($from_id, "📱 برای ثبت شماره، روی دکمهٔ زیر بزنید و شمارهٔ خودتان را ارسال کنید:", json_encode([
+            'keyboard' => [[['text' => "📱 ارسال شماره تماس", 'request_contact' => true]]],
+            'resize_keyboard' => true,
+            'one_time_keyboard' => true,
+        ]), 'html');
+        return true;
+    }
+    if ($datain === 'shopaddaddress') {
+        // Start the existing address wizard WITHOUT a pending product (pid 0):
+        // on completion it just saves the address as default.
+        update("user", "Processing_value", 'shop_addr:0', "id", $from_id);
+        step('shop_address_name', $from_id);
+        sendmessage($from_id, "🏠 افزودن آدرس جدید.\n\nلطفاً <b>نام و نام خانوادگی گیرنده</b> را ارسال کنید:", null, 'html');
+        return true;
+    }
+
     // Show the shop product list.
     if ($datain === 'shoplist') {
         shop_render_list($from_id);
@@ -5327,6 +5670,18 @@ function shop_handle_callback($datain, $from_id, $user)
         }
         if (!shop_product_available($product)) {
             sendmessage($from_id, "⛔️ این محصول در حال حاضر ناموجود است.", null, 'html');
+            return true;
+        }
+        // Profile gate: a direct purchase requires a completed profile (phone
+        // number on record) so the customer is identified in our DB. Adding to
+        // the cart stays open to everyone — the same gate runs at cart
+        // checkout, which is the only moment the profile really matters.
+        if (!shop_profile_complete($user)) {
+            sendmessage($from_id, "⚠️ برای خرید ابتدا باید پروفایل خود را تکمیل کنید (ثبت شماره تماس).", json_encode(['inline_keyboard' => [
+                [['text' => "👤 تکمیل پروفایل", 'callback_data' => "shopprofile"]],
+                [['text' => "➕ افزودن به سبد (بدون پروفایل)", 'callback_data' => "cartadd_" . (int) $m[1]]],
+                [['text' => "🔙 بازگشت", 'callback_data' => "shopmenu"]],
+            ]]), 'html');
             return true;
         }
 
@@ -5567,6 +5922,21 @@ function shop_handle_address_step($step, $text, $from_id, $user)
         update("user", "Processing_value", "0", "id", $from_id);
     }
     step('home', $from_id);
+
+    // pid 0 = the wizard was started from the profile (no pending purchase):
+    // just confirm the saved address and return to the profile.
+    if ($pid === 0) {
+        sendmessage(
+            $from_id,
+            "✅ آدرس شما ذخیره شد:\n\n" . address_format(address_get($newId, $from_id)),
+            json_encode(['inline_keyboard' => [
+                [['text' => "👤 بازگشت به پروفایل", 'callback_data' => "shopprofile"]],
+                [['text' => "🛍 فروشگاه", 'callback_data' => "shopmenu"]],
+            ]]),
+            'html'
+        );
+        return true;
+    }
 
     $product = shop_product($pid);
     if (!$product) {
