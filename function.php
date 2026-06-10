@@ -5418,7 +5418,12 @@ function shop_checkout_cart($from_id, $user)
 
     if ($balance < $payable) {
         $need = number_format($payable - $balance);
-        sendmessage($from_id, "موجودی کیف پول شما کافی نیست. کسری: <b>{$need}</b> {$cur}", null, 'html');
+        // Route the customer straight to the existing wallet top-up flow
+        // (Add_Balance → all configured payment gateways) instead of a dead end.
+        sendmessage($from_id, "موجودی کیف پول شما کافی نیست. کسری: <b>{$need}</b> {$cur}\n\nابتدا کیف پول خود را شارژ کنید، سپس دوباره تسویه را بزنید. سبد شما محفوظ می‌ماند.", json_encode(['inline_keyboard' => [
+            [['text' => "💳 افزایش موجودی", 'callback_data' => "Add_Balance"]],
+            [['text' => "🛒 بازگشت به سبد", 'callback_data' => "shopcart"]],
+        ]]), 'html');
         return true;
     }
 
@@ -5723,10 +5728,16 @@ function shop_handle_callback($datain, $from_id, $user)
 
         if ($balance < $payable) {
             $need = number_format($payable - $balance);
+            // Same wallet-first UX as the cart: send the buyer to the existing
+            // Add_Balance flow (gateways/card-to-card) instead of a dead end.
             sendmessage(
                 $from_id,
-                "موجودی کیف پول شما کافی نیست. کسری: <b>{$need}</b> " . store_currency(),
-                null,
+                "موجودی کیف پول شما کافی نیست. کسری: <b>{$need}</b> " . store_currency()
+                    . "\n\nابتدا کیف پول خود را شارژ کنید، سپس دوباره خرید را بزنید.",
+                json_encode(['inline_keyboard' => [
+                    [['text' => "💳 افزایش موجودی", 'callback_data' => "Add_Balance"]],
+                    [['text' => "🔙 بازگشت به محصول", 'callback_data' => "shopview_" . (int) $product['id']]],
+                ]]),
                 'html'
             );
             return true;
@@ -6629,7 +6640,9 @@ function shop_render_my_orders($from_id)
             }
         }
     }
-    sendmessage($from_id, $msg, null, 'html');
+    sendmessage($from_id, $msg, json_encode(['inline_keyboard' => [
+        [['text' => "🛍 فروشگاه", 'callback_data' => "shopmenu"]],
+    ]]), 'html');
     return true;
 }
 
