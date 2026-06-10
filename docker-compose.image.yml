@@ -24,6 +24,9 @@ services:
   app:
     # Pre-built image pulled from GHCR (override via MIRZA_IMAGE env var).
     image: "${MIRZA_IMAGE:-ghcr.io/saeedkhoshafsar/mirzabot:latest}"
+    # CRITICAL: without this, Docker reuses a locally-cached ":latest" image and
+    # a Coolify "Redeploy" silently runs OLD code. Always re-pull on deploy.
+    pull_policy: always
     restart: unless-stopped
     depends_on:
       mariadb:
