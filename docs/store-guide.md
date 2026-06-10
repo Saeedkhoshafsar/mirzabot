@@ -285,19 +285,32 @@ postal_code, address, is_default, created_at` (utf8mb4).
 ## ۹. جریان کامل خرید (Checkout Flow)
 
 ```
-فهرست فروشگاه (shoplist / /shop)
-  └─ مشاهدهٔ محصول (shopview_{id})  → نمایش قیمت، موجودی، سایز/واریانت
-       └─ خرید (shopbuy_{id})
-            ├─ اگر needs_address → جمع‌آوری آدرس (نام→موبایل→استان→شهر→آدرس→کدپستی)
-            ├─ کد تخفیف (shop_coupon_{id})  → validate_discount_code
-            ├─ پرداخت (کیف پول / درگاه)
-            ├─ ثبت سفارش (shop_record_order با address_id)
-            ├─ کسر موجودی (product_decrement_stock)
-            └─ تحویل (shop_deliver_product):
-                 • physical  → نیاز به ارسال؛ ادمین کد رهگیری ثبت می‌کند
-                 • digital_file → ارسال فایل
-                 • serial_code  → تحویل کد یکتا (تراکنش + FOR UPDATE)
-                 • service/vpn  → رفتار مربوطه
+منوی اصلی فروشگاه (shopmenu / /shop / دکمهٔ «خرید» منو در حالت فروشگاه)
+  ├─ 👤 پروفایل (shopprofile)
+  │     ├─ ثبت/تغییر شماره (shopsetphone → جریان get_number با request_contact)
+  │     └─ افزودن/تغییر آدرس (shopaddaddress → ویزارد آدرس با shop_addr:0)
+  ├─ 🛍 خرید (shopbuymenu)
+  │     ├─ 🆕 جدیدترین محصولات (shopnewest_{page}) — فقط موجودها، ۵تایی + «بعدی/قبلی»
+  │     ├─ 🗂 دسته‌بندی (shopcats → shopcatv_{hash}_{page}) — ۵تایی صفحه‌بندی
+  │     ├─ 🔍 جستجوی پیشرفته (shopsearch)
+  │     └─ همهٔ محصولات (shoplist)
+  ├─ 🛒 سبد خرید (shopcart) — با شمارندهٔ اقلام
+  └─ 🎧 پشتیبان (supportbtns — بخش پشتیبانی موجود)
+
+مشاهدهٔ محصول (shopview_{id})  → قیمت، موجودی، «مشاهدهٔ همهٔ تصاویر و تنوع‌ها»
+  └─ خرید (shopbuy_{id}) / تسویهٔ سبد (cartcheckout)
+       ├─ ⛔ گیت پروفایل: بدون شمارهٔ ثبت‌شده → هدایت به «تکمیل پروفایل»
+       │   (افزودن به سبد بدون پروفایل آزاد است؛ گیت فقط لحظهٔ نهایی‌سازی)
+       ├─ اگر needs_address → جمع‌آوری آدرس (نام→موبایل→استان→شهر→آدرس→کدپستی)
+       ├─ کد تخفیف (shop_coupon_{id})  → validate_discount_code
+       ├─ پرداخت (کیف پول؛ کسری → دکمهٔ «💳 افزایش موجودی» = درگاه‌های موجود)
+       ├─ ثبت سفارش (shop_record_order با address_id)
+       ├─ کسر موجودی (product_decrement_stock)
+       └─ تحویل (shop_deliver_product):
+            • physical  → نیاز به ارسال؛ ادمین کد رهگیری ثبت می‌کند
+            • digital_file → ارسال فایل
+            • serial_code  → تحویل کد یکتا (تراکنش + FOR UPDATE)
+            • service/vpn  → رفتار مربوطه
 ```
 
 پس از تحویل، مشتری از «سفارش‌های من» وضعیت و کد رهگیری را دنبال می‌کند و با ثبت کد

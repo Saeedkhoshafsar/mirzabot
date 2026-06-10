@@ -686,6 +686,20 @@ if ($text == "/start" || $datain == "start" || $text == "start") {
     shop_handle_callback('shopsearch', $from_id, $user);
     return;
 } elseif (
+    // STORE MODE: the main-menu «خرید» button opens the shop menu, not the VPN
+    // sell wizard. Guarded by panel_mode() so VPN bots are 100% untouched —
+    // their sell handler further below keeps receiving these taps as before.
+    function_exists('panel_mode') && panel_mode() !== 'vpn'
+    && function_exists('shop_render_main_menu')
+    && (
+        $text == $textbotlang['textbot']['sell']
+        || (function_exists('bot_label') && $text != '' && $text == bot_label('sell', null, $textbotlang['textbot']['sell']))
+        || $datain === 'buy' || $text === '/buy'
+    )
+) {
+    shop_handle_callback('shopmenu', $from_id, $user);
+    return;
+} elseif (
     $datain === 'shoplist' || $text === '/shop' || $datain === 'shopcart' || $text === '/cart'
     || preg_match('/^shop(view|buy|coupon|gallery)_\d+$/', $datain)
     || preg_match('/^shopnewest_\d+$/', $datain)
