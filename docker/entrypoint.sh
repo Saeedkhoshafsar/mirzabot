@@ -39,6 +39,25 @@ DB_PASSWORD="${DB_PASSWORD:-mirzabot}"
 DB_PORT="${DB_PORT:-3306}"
 
 # ---------------------------------------------------------------------------
+# 2b) Panel profile (PANEL_MODE) - what this container IS
+#     vpn | shop | digital | channel | custom   (default: vpn)
+#     Baked into config.php via putenv() below, because Apache/mod_php under
+#     supervisord does NOT reliably expose container env vars to getenv().
+#     This guarantees every entry point (webhook, web panel, cron) sees the
+#     same mode, deterministically.
+# ---------------------------------------------------------------------------
+PANEL_MODE="${PANEL_MODE:-vpn}"
+PANEL_MODE="$(echo "$PANEL_MODE" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+case "$PANEL_MODE" in
+    vpn|shop|digital|channel|custom) : ;;
+    *)
+        err "Unknown PANEL_MODE='${PANEL_MODE}' - falling back to 'vpn'. Valid: vpn|shop|digital|channel|custom"
+        PANEL_MODE="vpn"
+        ;;
+esac
+log "Panel profile (PANEL_MODE): ${PANEL_MODE}"
+
+# ---------------------------------------------------------------------------
 # 3) Generate config.php (always regenerated so env changes take effect)
 # ---------------------------------------------------------------------------
 log "Generating config.php ..."
@@ -61,6 +80,11 @@ try { \$pdo = new PDO(\$dsn, \$usernamedb, \$passworddb, \$options); } catch (\P
 \$adminnumber = '${ADMIN_CHAT_ID}';
 \$domainhosts = '${BOT_DOMAIN}';
 \$usernamebot = '${BOT_USERNAME}';
+// Panel profile for THIS container (vpn|shop|digital|channel|custom).
+// putenv() makes getenv('PANEL_MODE') work in every SAPI (mod_php, CLI, cron)
+// even when Apache does not forward container environment variables.
+if (getenv('PANEL_MODE') === false) { putenv('PANEL_MODE=${PANEL_MODE}'); }
+\$_ENV['PANEL_MODE'] = \$_ENV['PANEL_MODE'] ?? '${PANEL_MODE}';
 ?>
 EOF
 chown www-data:www-data "$CONFIG_FILE"

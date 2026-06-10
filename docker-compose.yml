@@ -29,6 +29,11 @@ services:
       BOT_TOKEN: "${BOT_TOKEN}"
       ADMIN_CHAT_ID: "${ADMIN_CHAT_ID}"
       BOT_USERNAME: "${BOT_USERNAME}"
+      # ---- Panel profile: what this bot IS --------------------------------
+      # vpn | shop | digital | channel | custom   (default: vpn)
+      # CRITICAL: this line is what actually delivers PANEL_MODE into the
+      # container. Without it the bot silently falls back to VPN mode.
+      PANEL_MODE: "${PANEL_MODE:-vpn}"
       # ---- Database (auto, defaults match the mariadb service below) ----
       DB_HOST: "mariadb"
       DB_PORT: "3306"

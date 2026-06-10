@@ -33,6 +33,10 @@ services:
       BOT_TOKEN: "${BOT_TOKEN}"
       ADMIN_CHAT_ID: "${ADMIN_CHAT_ID}"
       BOT_USERNAME: "${BOT_USERNAME}"
+      # vpn | shop | digital | channel | custom   (default: vpn)
+      # CRITICAL: must be listed here, otherwise PANEL_MODE set in Coolify
+      # never reaches the container and the bot falls back to VPN mode.
+      PANEL_MODE: "${PANEL_MODE:-vpn}"
       DB_HOST: "mariadb"
       DB_PORT: "3306"
       DB_NAME: "${DB_NAME:-mirzabot}"

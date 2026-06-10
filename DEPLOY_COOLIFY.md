@@ -41,6 +41,14 @@ you only have to enter **4 variables** manually.
 > اگر ست نشود، رفتار پیش‌فرض `vpn` است و چیزی تغییر نمی‌کند.
 > جزئیات کامل در [`docs/store-guide.md`](docs/store-guide.md).
 
+> ✅ **زنجیرهٔ تحویل (مهم):** `PANEL_MODE` حالا در هر دو فایل compose
+> (`docker-compose.yml` و `docker-compose.image.yml`) لیست شده و در
+> `docker/entrypoint.sh` اعتبارسنجی و داخل `config.php` تزریق می‌شود
+> (`putenv`). یعنی مقداری که در Coolify ست می‌کنید **تضمینی** به ربات،
+> پنل وب و کرون‌جاب‌ها می‌رسد. در نسخه‌های قبلی این متغیر در compose لیست
+> نشده بود و در عمل هرگز به کانتینر نمی‌رسید (ربات همیشه vpn می‌ماند).
+> بعد از تغییر `PANEL_MODE` حتماً **Redeploy** بزنید تا config.php بازسازی شود.
+
 ---
 
 ## 🚄 روش پیشنهادی: نصب با Docker Image (سریع‌ترین)
