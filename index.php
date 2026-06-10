@@ -677,6 +677,30 @@ if ($text == "/start" || $datain == "start" || $text == "start") {
 } elseif (($user['step'] ?? '') === 'shop_search' && shop_handle_search_step($user['step'], $text, $from_id, $user)) {
     // User is typing a product search query.
     return;
+} elseif ($text === '/mode' && in_array($from_id, $admin_ids)) {
+    // Admin-only diagnostics: shows EXACTLY how the panel mode is resolved on
+    // this running container, so "I set PANEL_MODE but nothing changed" can be
+    // debugged from inside Telegram with zero SSH/panel access.
+    $envv  = getenv('PANEL_MODE');
+    $smode = select("setting", "store_mode", null, null, "FETCH_COLUMN");
+    if (is_array($smode)) { $smode = $smode[0] ?? null; }
+    $kbfd  = function_exists('keyboard_is_factory_default')
+        ? (keyboard_is_factory_default($setting['keyboardmain'] ?? '') ? 'yes' : 'NO (custom layout)') : 'n/a';
+    $diag = "🔍 Panel mode diagnostics\n"
+        . "──────────────────\n"
+        . "ENV PANEL_MODE: " . ($envv === false ? "❌ NOT SET (compose/Coolify did not deliver it!)" : "✅ " . $envv) . "\n"
+        . "panel_mode(): " . (function_exists('panel_mode') ? panel_mode() : 'n/a') . "\n"
+        . "setting.store_mode: " . var_export($smode, true) . "\n"
+        . "keyboardmain factory-default: " . $kbfd . "\n"
+        . "version file: " . trim((string) @file_get_contents(__DIR__ . '/version')) . "\n"
+        . "──────────────────\n"
+        . (($envv === false)
+            ? "⚠️ ENV نرسیده: یعنی کانتینر با کد/کانفیگ قدیمی بالا آمده. چک‌لیست:\n1) فایل compose در Coolify باید PANEL_MODE را در environment داشته باشد\n2) اگر از ایمیج GHCR استفاده می‌کنید، باید ایمیج جدید pull شود (نه کش قدیمی)\n3) بعد از تغییر ENV حتماً Redeploy (نه فقط Restart)"
+            : ((function_exists('panel_mode') && panel_mode() !== 'vpn')
+                ? "✅ حالت فروشگاه فعال است. اگر دکمه‌ها قدیمی‌اند، keyboardmain سفارشی شده (بالا را ببینید) — از پنل وب آن را ریست کنید."
+                : "⚠️ ENV ست شده ولی مقدار نامعتبر است."));
+    sendmessage($from_id, $diag, null, 'HTML');
+    return;
 } elseif ($datain === 'shoporders' || $text === '/myorders') {
     // Customer's own shop orders + tracking codes — isolated from the VPN flow.
     shop_render_my_orders($from_id);
